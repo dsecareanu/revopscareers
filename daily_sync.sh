@@ -7,6 +7,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_FILE="$HOME/Library/Logs/revopscareers_sync.log"
+mkdir -p "$(dirname "$LOG_FILE")"
 PYTHON="$(which python3)"
 LOCK_FILE="/tmp/revopscareers_sync.lock"
 
