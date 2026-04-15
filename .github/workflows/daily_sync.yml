@@ -2,8 +2,8 @@ name: Daily Job Sync
 
 on:
   schedule:
-    # 06:30 UTC = 09:30 EEST (UTC+3, summer). In winter (EET, UTC+2) this fires at 08:30 local.
-    - cron: '30 6 * * *'
+    # 03:00 UTC = 06:00 EEST (UTC+3, summer). In winter (EET, UTC+2) this fires at 05:00 local.
+    - cron: '0 3 * * *'
   workflow_dispatch: # allow manual runs from the GitHub Actions UI
 
 jobs:
