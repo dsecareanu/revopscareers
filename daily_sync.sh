@@ -34,7 +34,7 @@ log "===== Daily sync started ====="
 #    - Sets ALT text on newly uploaded logos inline
 #    - Notifies n8n data tables (jobs + logos)
 log "Step 1/4 — Hirebase sync (--since 1)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u sync_hirebase_jobs.py --since 1 2>&1 | tee -a "$LOG_FILE"
+cd "$SCRIPT_DIR" && "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
 if [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: sync_hirebase_jobs.py exited with code $SYNC_EXIT"
@@ -69,7 +69,7 @@ if [ $SYNC_EXIT -ne 0 ]; then
 fi
 
 # 6. Unfeature webadmin jobs older than 1 day
-log "Step 6/7 — Unfeature old jobs (>1 day)..."
+log "Step 6/9 — Unfeature old jobs (>1 day)..."
 cd "$SCRIPT_DIR" && "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
 if [ $SYNC_EXIT -ne 0 ]; then
@@ -77,11 +77,27 @@ if [ $SYNC_EXIT -ne 0 ]; then
 fi
 
 # 7. Add missing logos for jobs posted in the last 1 day
-log "Step 7/7 — Add missing logos (last 1 day)..."
+log "Step 7/9 — Add missing logos (last 1 day)..."
 cd "$SCRIPT_DIR" && "$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
 if [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: add_missing_logos.py exited with code $SYNC_EXIT"
+fi
+
+# 8. Set fallback logo on any jobs still missing featured image (last 1 day)
+log "Step 8/9 — Fallback logo patch (last 1 day)..."
+cd "$SCRIPT_DIR" && "$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+SYNC_EXIT=${PIPESTATUS[0]}
+if [ $SYNC_EXIT -ne 0 ]; then
+    log "ERROR: patch_fallback_logos.py exited with code $SYNC_EXIT"
+fi
+
+# 9. Assign tags to untagged jobs published in the last 1 day
+log "Step 9/9 — Missing tags patch (last 1 day)..."
+cd "$SCRIPT_DIR" && "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+SYNC_EXIT=${PIPESTATUS[0]}
+if [ $SYNC_EXIT -ne 0 ]; then
+    log "ERROR: patch_missing_tags.py exited with code $SYNC_EXIT"
 fi
 
 log "===== Daily sync complete ====="

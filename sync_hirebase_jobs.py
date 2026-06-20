@@ -948,6 +948,8 @@ def main() -> None:
                         help="Fetch jobs posted within the last N days (overrides date filter)")
     parser.add_argument("--check-logos", action="store_true",
                         help="Also resolve logos during --dry-run (slower but shows logo results)")
+    parser.add_argument("--max-new", type=int, default=None, metavar="N",
+                        help="Stop after publishing N new jobs total (saves state and exits cleanly)")
     args = parser.parse_args()
 
     if not HIREBASE_API_KEY:
@@ -990,6 +992,7 @@ def main() -> None:
     new_count    = 0
     skip_count   = 0
     error_count  = 0
+    max_new_reached = False
     # logo_cache: company_name → media_id. Seeded from persisted state so logos
     # are never re-uploaded across runs (prevents hilton-2.jpg, hilton-3.jpg etc.)
     logo_cache: dict[str, int | None] = {
@@ -1124,6 +1127,11 @@ def main() -> None:
                     if not args.dry_run and new_count % WP_BATCH_SIZE == 0:
                         print(f"  [batch] {new_count} posts published — pausing {WP_BATCH_PAUSE}s...")
                         time.sleep(WP_BATCH_PAUSE)
+
+                    if args.max_new and new_count >= args.max_new:
+                        print(f"  --max-new {args.max_new} reached — stopping.")
+                        max_new_reached = True
+                        break
                 else:
                     error_count += 1
 
@@ -1136,6 +1144,9 @@ def main() -> None:
                 save_state(state)
 
             # Early-exit conditions within this cluster
+            if max_new_reached:
+                break
+
             if len(jobs) < PAGE_SIZE:
                 print("  Last page reached.")
                 break
@@ -1151,6 +1162,9 @@ def main() -> None:
                 stale_pages = 0
 
             time.sleep(0.5)
+
+        if max_new_reached:
+            break
 
     print()
     prefix = "[DRY RUN] " if args.dry_run else ""
