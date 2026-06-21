@@ -33,46 +33,58 @@ log "===== Daily sync started ====="
 #    - Skips dupes via imported_jobs.json + WP application URL check
 #    - Sets ALT text on newly uploaded logos inline
 #    - Notifies n8n data tables (jobs + logos)
-log "Step 1/4 — Hirebase sync (--since 1)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 2>&1 | tee -a "$LOG_FILE"
+#    - Capped at 90 min (normal ~80 min) so later steps always get to run;
+#      state is saved per page, so a timeout loses at most one page of imports.
+log "Step 1/9 — Hirebase sync (--since 1, timeout 90m)..."
+cd "$SCRIPT_DIR" && timeout 90m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
+if [ $SYNC_EXIT -eq 124 ]; then
+    log "WARNING: Hirebase sync reached 90-min timeout — continuing with next step"
+elif [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: sync_hirebase_jobs.py exited with code $SYNC_EXIT"
 fi
 
 # 2. Fix ALT text on any logos missing it (catches logos from previous runs)
-log "Step 2/4 — ALT text fix (last 2 days)..."
+log "Step 2/9 — ALT text fix (last 2 days)..."
 cd "$SCRIPT_DIR" && "$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
 
 # 3. Import new jobs from WhatJobs US (past 2 days)
-log "Step 3/5 — WhatJobs US sync (--region us --max-age 5)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 2>&1 | tee -a "$LOG_FILE"
+log "Step 3/9 — WhatJobs US sync (--region us --max-age 5)..."
+cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
+if [ $SYNC_EXIT -eq 124 ]; then
+    log "WARNING: WhatJobs US sync reached 100-min timeout — continuing with next step"
+elif [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: sync_whatjobs_jobs.py (US) exited with code $SYNC_EXIT"
 fi
 
 # 4. Import new jobs from WhatJobs Singapore (past 2 days)
-log "Step 4/5 — WhatJobs SG sync (--region sg --max-age 5)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 2>&1 | tee -a "$LOG_FILE"
+log "Step 4/9 — WhatJobs SG sync (--region sg --max-age 5)..."
+cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
+if [ $SYNC_EXIT -eq 124 ]; then
+    log "WARNING: WhatJobs SG sync reached 100-min timeout — continuing with next step"
+elif [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: sync_whatjobs_jobs.py (SG) exited with code $SYNC_EXIT"
 fi
 
 # 5. Import new jobs from Lensa
-log "Step 5/5 — Lensa sync..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u sync_lensa_jobs.py 2>&1 | tee -a "$LOG_FILE"
+log "Step 5/9 — Lensa sync..."
+cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_lensa_jobs.py 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
+if [ $SYNC_EXIT -eq 124 ]; then
+    log "WARNING: Lensa sync reached 100-min timeout — continuing with next step"
+elif [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: sync_lensa_jobs.py exited with code $SYNC_EXIT"
 fi
 
 # 6. Unfeature webadmin jobs older than 1 day
 log "Step 6/9 — Unfeature old jobs (>1 day)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
+cd "$SCRIPT_DIR" && timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
+if [ $SYNC_EXIT -eq 124 ]; then
+    log "WARNING: Unfeature step reached 60-min timeout — continuing with next step"
+elif [ $SYNC_EXIT -ne 0 ]; then
     log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"
 fi
 
