@@ -3,6 +3,10 @@
 # RevOpsCareers — Daily Job Sync
 # Runs each morning to import new jobs posted in the past 1 day.
 # Logs to ~/Library/Logs/revopscareers_sync.log (rotated weekly by macOS)
+#
+# Phase 1: All 4 import scripts run in parallel to cut wall-clock time.
+#          Each writes to a temp log; output is printed in order after all finish.
+# Phase 2: Cleanup steps run sequentially (require imports to be done).
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -25,91 +29,86 @@ if [ -f "$LOCK_FILE" ]; then
     fi
 fi
 echo $$ > "$LOCK_FILE"
-trap "rm -f '$LOCK_FILE'" EXIT
+
+SYNC_TMPDIR=$(mktemp -d)
+trap "rm -f '$LOCK_FILE'; rm -rf '$SYNC_TMPDIR'" EXIT
+
+cd "$SCRIPT_DIR"
 
 log "===== Daily sync started ====="
 
-# 1. Import new jobs from Hirebase (past 1 day)
-#    - Skips dupes via imported_jobs.json + WP application URL check
-#    - Sets ALT text on newly uploaded logos inline
-#    - Notifies n8n data tables (jobs + logos)
-#    - Capped at 90 min (normal ~80 min) so later steps always get to run;
-#      state is saved per page, so a timeout loses at most one page of imports.
-log "Step 1/9 — Hirebase sync (--since 1, timeout 90m)..."
-cd "$SCRIPT_DIR" && timeout 90m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -eq 124 ]; then
-    log "WARNING: Hirebase sync reached 90-min timeout — continuing with next step"
-elif [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: sync_hirebase_jobs.py exited with code $SYNC_EXIT"
-fi
+# =============================================================================
+# Phase 1 — Parallel imports
+# Each script has its own state file (no conflicts) and its own timeout.
+# State is saved per page, so a timeout loses at most one page of imports.
+# =============================================================================
+log "Phase 1 — Starting parallel imports (Hirebase 90m / WhatJobs 100m / Lensa 100m)..."
 
-# 2. Fix ALT text on any logos missing it (catches logos from previous runs)
-log "Step 2/9 — ALT text fix (last 2 days)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
+timeout 90m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 \
+    > "$SYNC_TMPDIR/hirebase.log" 2>&1 &
+PID_HB=$!
 
-# 3. Import new jobs from WhatJobs US (past 2 days)
-log "Step 3/9 — WhatJobs US sync (--region us --max-age 5)..."
-cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -eq 124 ]; then
-    log "WARNING: WhatJobs US sync reached 100-min timeout — continuing with next step"
-elif [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: sync_whatjobs_jobs.py (US) exited with code $SYNC_EXIT"
-fi
+timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 \
+    > "$SYNC_TMPDIR/whatjobs_us.log" 2>&1 &
+PID_WJ_US=$!
 
-# 4. Import new jobs from WhatJobs Singapore (past 2 days)
-log "Step 4/9 — WhatJobs SG sync (--region sg --max-age 5)..."
-cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -eq 124 ]; then
-    log "WARNING: WhatJobs SG sync reached 100-min timeout — continuing with next step"
-elif [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: sync_whatjobs_jobs.py (SG) exited with code $SYNC_EXIT"
-fi
+timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 \
+    > "$SYNC_TMPDIR/whatjobs_sg.log" 2>&1 &
+PID_WJ_SG=$!
 
-# 5. Import new jobs from Lensa
-log "Step 5/9 — Lensa sync..."
-cd "$SCRIPT_DIR" && timeout 100m "$PYTHON" -u sync_lensa_jobs.py 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -eq 124 ]; then
-    log "WARNING: Lensa sync reached 100-min timeout — continuing with next step"
-elif [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: sync_lensa_jobs.py exited with code $SYNC_EXIT"
-fi
+timeout 100m "$PYTHON" -u sync_lensa_jobs.py \
+    > "$SYNC_TMPDIR/lensa.log" 2>&1 &
+PID_LENSA=$!
 
-# 6. Unfeature webadmin jobs older than 1 day
-log "Step 6/9 — Unfeature old jobs (>1 day)..."
-cd "$SCRIPT_DIR" && timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -eq 124 ]; then
-    log "WARNING: Unfeature step reached 60-min timeout — continuing with next step"
-elif [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"
-fi
+# Wait for all four and collect exit codes
+wait $PID_HB;    EXIT_HB=$?
+wait $PID_WJ_US; EXIT_WJ_US=$?
+wait $PID_WJ_SG; EXIT_WJ_SG=$?
+wait $PID_LENSA; EXIT_LENSA=$?
 
-# 7. Add missing logos for jobs posted in the last 1 day
-log "Step 7/9 — Add missing logos (last 1 day)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: add_missing_logos.py exited with code $SYNC_EXIT"
-fi
+# Print logs in order (stdout + append to log file)
+log "--- Hirebase output ---"
+cat "$SYNC_TMPDIR/hirebase.log" | tee -a "$LOG_FILE"
+if   [ $EXIT_HB -eq 124 ]; then log "WARNING: Hirebase timed out after 90 min"
+elif [ $EXIT_HB -ne 0 ];   then log "ERROR: Hirebase exited with code $EXIT_HB"; fi
 
-# 8. Set fallback logo on any jobs still missing featured image (last 1 day)
-log "Step 8/9 — Fallback logo patch (last 1 day)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: patch_fallback_logos.py exited with code $SYNC_EXIT"
-fi
+log "--- WhatJobs US output ---"
+cat "$SYNC_TMPDIR/whatjobs_us.log" | tee -a "$LOG_FILE"
+if   [ $EXIT_WJ_US -eq 124 ]; then log "WARNING: WhatJobs US timed out after 100 min"
+elif [ $EXIT_WJ_US -ne 0 ];   then log "ERROR: WhatJobs US exited with code $EXIT_WJ_US"; fi
 
-# 9. Assign tags to untagged jobs published in the last 1 day
-log "Step 9/9 — Missing tags patch (last 1 day)..."
-cd "$SCRIPT_DIR" && "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+log "--- WhatJobs SG output ---"
+cat "$SYNC_TMPDIR/whatjobs_sg.log" | tee -a "$LOG_FILE"
+if   [ $EXIT_WJ_SG -eq 124 ]; then log "WARNING: WhatJobs SG timed out after 100 min"
+elif [ $EXIT_WJ_SG -ne 0 ];   then log "ERROR: WhatJobs SG exited with code $EXIT_WJ_SG"; fi
+
+log "--- Lensa output ---"
+cat "$SYNC_TMPDIR/lensa.log" | tee -a "$LOG_FILE"
+if   [ $EXIT_LENSA -eq 124 ]; then log "WARNING: Lensa timed out after 100 min"
+elif [ $EXIT_LENSA -ne 0 ];   then log "ERROR: Lensa exited with code $EXIT_LENSA"; fi
+
+log "Phase 1 complete."
+
+# =============================================================================
+# Phase 2 — Cleanup (sequential, requires imports to be done)
+# =============================================================================
+
+log "Step 1/5 — ALT text fix (last 2 days)..."
+"$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
+
+log "Step 2/5 — Unfeature old jobs (>1 day)..."
+timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
-if [ $SYNC_EXIT -ne 0 ]; then
-    log "ERROR: patch_missing_tags.py exited with code $SYNC_EXIT"
-fi
+if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Unfeature timed out after 60 min"
+elif [ $SYNC_EXIT -ne 0 ];   then log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"; fi
+
+log "Step 3/5 — Add missing logos (last 1 day)..."
+"$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
+
+log "Step 4/5 — Fallback logo patch (last 1 day)..."
+"$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+
+log "Step 5/5 — Missing tags patch (last 1 day)..."
+"$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
 
 log "===== Daily sync complete ====="
