@@ -804,7 +804,11 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
     if dry_run:
         return {"dry_run": True}
 
-    resp = wp.post(f"{WP_API}/job-listings", json=payload, timeout=30)
+    try:
+        resp = wp.post(f"{WP_API}/job-listings", json=payload, timeout=30)
+    except Exception as e:
+        print(f"    [wp] Create error: {e}")
+        return None
     if resp.status_code in (200, 201):
         return resp.json()
     print(f"    [wp] Create failed ({resp.status_code}): {resp.text[:300]}")
