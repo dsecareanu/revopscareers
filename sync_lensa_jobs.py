@@ -657,6 +657,30 @@ def build_slug(title: str, company: str, location: str) -> str:
 def build_expiry() -> str:
     return (datetime.now() + timedelta(days=EXPIRY_DAYS)).strftime("%Y-%m-%d")
 
+def job_loc_str(job: dict) -> str:
+    """Location string as stored in _job_location (remote jobs → "Remote, United States")."""
+    if job["is_remote"]:
+        return "Remote, United States"
+    return f"{job['location']}, United States" if job["location"] else "United States"
+
+def _norm_key(s: str) -> str:
+    """Normalize a string for dedup key comparison (lowercase, strip punctuation)."""
+    if not s:
+        return ""
+    s = s.lower().strip()
+    s = re.sub(r"[^\w\s]", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+def _loc_key(s: str) -> str:
+    """Location for dedup: the remote-only pass stores "Remote, United States" while the
+    standard pass stores "Remote, Remote, United States" for the same job."""
+    return re.sub(r"\bremote( remote)+\b", "remote", _norm_key(s))
+
+def job_key(job: dict) -> tuple[str, str, str]:
+    """(company, title, location) identity — Lensa re-issues a new URL/ID for the same job daily."""
+    return (_norm_key(job["company"]), _norm_key(job["title"]), _loc_key(job_loc_str(job)))
+
 def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None:
     title        = job["title"]
     company      = job["company"]
@@ -664,11 +688,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
     is_remote    = job["is_remote"]
     category_ids = assign_categories(title)
 
-    # Location string: remote jobs → "Remote, United States"
-    if is_remote:
-        loc_str = "Remote, United States"
-    else:
-        loc_str = f"{location}, United States" if location else "United States"
+    loc_str = job_loc_str(job)
 
     payload: dict = {
         "title":   title,
@@ -725,7 +745,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 # STARTUP — pre-load existing application URLs from WP
 # =============================================================================
 
-def load_existing_application_urls() -> set[str]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
     print("Loading existing application URLs from WordPress...")
     urls: set[str] = set()
     try:
@@ -736,13 +756,17 @@ def load_existing_application_urls() -> set[str]:
         print(f"  ERROR: could not load existing jobs: {e}")
         sys.exit(1)
 
+    keys: set[tuple[str, str, str]] = set()
     for row in rows:
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
+        company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
+        if company and title:
+            keys.add((company, title, _loc_key(row.get("location") or "")))
 
-    print(f"\n  Done. {len(urls)} existing application URLs loaded.\n")
-    return urls
+    print(f"\n  Done. {len(urls)} existing application URLs + {len(keys)} identity keys loaded.\n")
+    return urls, keys
 
 # =============================================================================
 # MAIN
@@ -787,7 +811,7 @@ def main() -> None:
     print(f"  Local state: {len(imported_ids)} previously imported IDs")
     print()
 
-    existing_urls = load_existing_application_urls()
+    existing_urls, existing_keys = load_existing_application_urls()
 
     global tag_ids
     tag_ids = fetch_tag_ids(wp, WP_API)
@@ -827,7 +851,7 @@ def main() -> None:
                 if unique_id in imported_ids:
                     skip_count += 1
                     continue
-                if app_url in existing_urls:
+                if app_url in existing_urls or job_key(job) in existing_keys:
                     skip_count += 1
                     imported_ids.add(unique_id)  # sync state
                     continue
@@ -883,6 +907,7 @@ def main() -> None:
                         print(f"    [wp] post ID {post_id}")
                         imported_ids.add(unique_id)
                         existing_urls.add(app_url)
+                        existing_keys.add(job_key(job))
                         notify_n8n("jobs", {
                             "job_title":        title,
                             "company_name":     company,

@@ -841,6 +841,9 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
             urls.add(str(app).strip())
         company  = _norm_key(row.get("company") or "")
         location = _norm_key(row.get("location") or "")
+        title    = _norm_key(row.get("title") or "")
+        if company and title:
+            keys.add((company, title, location))  # stored title (reliable for prefixed slugs)
         slug = row.get("slug") or ""
         if company and slug:
             slug_norm = slug.replace("-", " ")

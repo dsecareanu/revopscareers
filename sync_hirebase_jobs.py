@@ -867,6 +867,9 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
             urls.add(str(app).strip())
         company  = _norm_key(row.get("company") or "")
         location = _norm_key(row.get("location") or "")
+        title    = _norm_key(row.get("title") or "")
+        if company and title:
+            keys.add((company, title, location))  # stored title (reliable for prefixed slugs)
         # Derive title from slug: strip company prefix and location suffix
         slug = row.get("slug") or ""
         if company and slug:
@@ -1052,7 +1055,15 @@ def main() -> None:
                     _norm_key(build_location(job)),
                 )
 
-                if hb_id in imported_ids or app_url in existing_urls or job_key in existing_keys:
+                is_remote_job = (job.get("location_type") or "").lower() == "remote"
+                stored_key = (
+                    _norm_key(company),
+                    _norm_key(normalize_title(title)),
+                    _norm_key(build_location(job) or ("Remote" if is_remote_job else "")),
+                )
+
+                if (hb_id in imported_ids or app_url in existing_urls
+                        or job_key in existing_keys or stored_key in existing_keys):
                     skip_count += 1
                     continue
 
@@ -1135,6 +1146,7 @@ def main() -> None:
                     imported_ids.add(hb_id)
                     existing_urls.add(app_url)
                     existing_keys.add(job_key)
+                    existing_keys.add(stored_key)
                     new_count += 1
                     page_new  += 1
 
