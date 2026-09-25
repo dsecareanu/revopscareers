@@ -211,3 +211,6 @@ __marimo__/
 
 # Claude Code local settings (may contain credentials)
 .claude/
+
+# Sync state lives on the server (not in this public repo)
+imported_*.json

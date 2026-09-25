@@ -10,7 +10,8 @@
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG_FILE="$HOME/Library/Logs/revopscareers_sync.log"
+LOG_FILE="${SYNC_LOG_FILE:-$HOME/Library/Logs/revopscareers_sync.log}"
+MODE="${1:-full}"   # full = imports + cleanup, imports = Phase 1 only
 mkdir -p "$(dirname "$LOG_FILE")"
 PYTHON="$(which python3)"
 LOCK_FILE="/tmp/revopscareers_sync.lock"
@@ -35,7 +36,7 @@ trap "rm -f '$LOCK_FILE'; rm -rf '$SYNC_TMPDIR'" EXIT
 
 cd "$SCRIPT_DIR"
 
-log "===== Daily sync started ====="
+log "===== Daily sync started (mode: $MODE) ====="
 
 # =============================================================================
 # Phase 1 — Parallel imports
@@ -89,32 +90,38 @@ elif [ $EXIT_LENSA -ne 0 ];   then log "ERROR: Lensa exited with code $EXIT_LENS
 
 log "Phase 1 complete."
 
-# =============================================================================
-# Phase 2 — Cleanup (sequential, requires imports to be done)
-# =============================================================================
+if [ "$MODE" = "imports" ]; then
+    log "Imports-only run — skipping Phase 2 cleanup."
+else
 
-log "Step 1/5 — ALT text fix (last 2 days)..."
-"$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
+    # =============================================================================
+    # Phase 2 — Cleanup (sequential, requires imports to be done)
+    # =============================================================================
 
-log "Step 2/5 — Unfeature old jobs (>1 day)..."
-timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
-SYNC_EXIT=${PIPESTATUS[0]}
-if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Unfeature timed out after 60 min"
-elif [ $SYNC_EXIT -ne 0 ];   then log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"; fi
+    log "Step 1/5 — ALT text fix (last 2 days)..."
+    "$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
 
-log "Step 3/5 — Add missing logos (last 1 day)..."
-"$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
+    log "Step 2/5 — Unfeature old jobs (>1 day)..."
+    timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
+    SYNC_EXIT=${PIPESTATUS[0]}
+    if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Unfeature timed out after 60 min"
+    elif [ $SYNC_EXIT -ne 0 ];   then log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"; fi
 
-log "Step 4/5 — Fallback logo patch (last 1 day)..."
-"$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+    log "Step 3/5 — Add missing logos (last 1 day)..."
+    "$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
 
-log "Step 5/5 — Missing tags patch (last 1 day)..."
-"$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+    log "Step 4/5 — Fallback logo patch (last 1 day)..."
+    "$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+
+    log "Step 5/5 — Missing tags patch (last 1 day)..."
+    "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+
+fi
 
 log "===== Daily sync complete ====="
 
-# Fail the run (GitHub Action goes red) if a WhatJobs import errored out.
+# Fail the run (triggers the failure alert) if any import errored out.
 # Timeouts (124) stay warnings, matching the other steps.
-for code in $EXIT_WJ_US $EXIT_WJ_SG; do
+for code in $EXIT_HB $EXIT_WJ_US $EXIT_WJ_SG $EXIT_LENSA; do
     if [ $code -ne 0 ] && [ $code -ne 124 ]; then exit 1; fi
 done
