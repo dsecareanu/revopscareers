@@ -16,7 +16,7 @@ imports them as job_listing posts in WordPress. Full workflow:
 State file format (v2):
   {
     "jobs": {
-      "<url>": {
+      "<sha256(url)[:32]>": {
         "wp_post_id":   12345,
         "imported_at":  "2026-03-23",
         "last_checked": "2026-03-23",
@@ -47,6 +47,7 @@ Requirements:
 """
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -405,6 +406,10 @@ except ImportError:
 # STATE — v2 format with per-job metadata for refresh
 # =============================================================================
 
+def _url_key(url: str) -> str:
+    """State keys are hashed so the (public) state file doesn't expose paid apply URLs."""
+    return hashlib.sha256(url.encode()).hexdigest()[:32]
+
 def load_state() -> dict:
     """Load state, migrating v1 (imported_urls list) to v2 (jobs dict) if needed."""
     if not _STATE_FILE.exists():
@@ -428,6 +433,13 @@ def load_state() -> dict:
         state["jobs"] = jobs
         del state["imported_urls"]
         print(f"  [state] Migrated {len(jobs)} URLs from v1 to v2 format.")
+
+    # Migrate plain-URL keys to hashed keys
+    plain = [k for k in state.get("jobs", {}) if k.startswith("http")]
+    for url in plain:
+        state["jobs"][_url_key(url)] = state["jobs"].pop(url)
+    if plain:
+        print(f"  [state] Hashed {len(plain)} URL keys.")
 
     if "logo_ids" not in state:
         state["logo_ids"] = {}
@@ -962,8 +974,8 @@ def main() -> None:
                 # ----------------------------------------------------------------
                 # KNOWN JOB — check for refresh
                 # ----------------------------------------------------------------
-                if app_url in jobs_state:
-                    rec = jobs_state[app_url]
+                if _url_key(app_url) in jobs_state:
+                    rec = jobs_state[_url_key(app_url)]
 
                     # Only refresh if within refresh window and wp_post_id is known
                     if (args.refresh_days > 0
@@ -1068,7 +1080,7 @@ def main() -> None:
                     if not args.dry_run:
                         post_id = result.get("id", "?")
                         print(f"    [wp] post ID {post_id}")
-                        jobs_state[app_url] = {
+                        jobs_state[_url_key(app_url)] = {
                             "wp_post_id":   post_id,
                             "imported_at":  today,
                             "last_checked": today,
