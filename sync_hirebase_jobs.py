@@ -891,9 +891,17 @@ def fetch_hirebase_page(cluster_name: str, cluster_titles: list[str],
         "vector": {"query": cluster_name},
         "lexical": lexical,
     }
-    resp = hb.post(HIREBASE_URL, json=payload, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    # neural-search is often slow: generous timeout + retries before giving up on a cluster
+    for attempt in range(1, 4):
+        try:
+            resp = hb.post(HIREBASE_URL, json=payload, timeout=90)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt == 3:
+                raise
+            print(f"\n  Hirebase timeout/connection error (attempt {attempt}/3): {e} — retrying...", end=" ")
+            time.sleep(15 * attempt)
 
 # =============================================================================
 # MAIN
@@ -983,8 +991,18 @@ def main() -> None:
         name: mid for name, mid in state.get("logo_ids", {}).items()
     }
 
-    for cluster_idx, (cluster_name, cluster_titles) in enumerate(SEARCH_CLUSTERS.items(), 1):
+    # Resume from the cluster the previous run was working on (it may have been cut
+    # short by the timeout or --max-new), so every cluster gets searched across runs.
+    start = state.get("next_cluster", 0) % num_clusters
+    clusters = list(SEARCH_CLUSTERS.items())
+    if start:
+        print(f"  Resuming at cluster {start + 1}/{num_clusters}")
+    for n, (cluster_name, cluster_titles) in enumerate(clusters[start:] + clusters[:start]):
+        cluster_idx = (start + n) % num_clusters + 1
         print(f"\n[Cluster {cluster_idx}/{num_clusters}: {cluster_name}]")
+        if not args.dry_run:
+            state["next_cluster"] = cluster_idx - 1
+            save_state(state)
         stale_pages = 0  # reset per cluster
 
         for page in range(1, cluster_page_cap + 1):
@@ -1149,6 +1167,11 @@ def main() -> None:
 
         if max_new_reached:
             break
+    else:
+        # Full pass completed — next run starts from the first cluster again
+        if not args.dry_run:
+            state["next_cluster"] = 0
+            save_state(state)
 
     print()
     prefix = "[DRY RUN] " if args.dry_run else ""

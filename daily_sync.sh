@@ -12,6 +12,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_FILE="${SYNC_LOG_FILE:-$HOME/Library/Logs/revopscareers_sync.log}"
 MODE="${1:-full}"   # full = imports + cleanup, imports = Phase 1 only
+IMPORT_TIMEOUT_MIN=240   # per import script; runs are 6h apart on the server
 mkdir -p "$(dirname "$LOG_FILE")"
 PYTHON="$(which python3)"
 LOCK_FILE="/tmp/revopscareers_sync.lock"
@@ -43,21 +44,21 @@ log "===== Daily sync started (mode: $MODE) ====="
 # Each script has its own state file (no conflicts) and its own timeout.
 # State is saved per page, so a timeout loses at most one page of imports.
 # =============================================================================
-log "Phase 1 — Starting parallel imports (Hirebase 90m / WhatJobs 100m / Lensa 100m)..."
+log "Phase 1 — Starting parallel imports (timeout ${IMPORT_TIMEOUT_MIN}m each)..."
 
-timeout 90m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 \
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 \
     > "$SYNC_TMPDIR/hirebase.log" 2>&1 &
 PID_HB=$!
 
-timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 \
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 \
     > "$SYNC_TMPDIR/whatjobs_us.log" 2>&1 &
 PID_WJ_US=$!
 
-timeout 100m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 \
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 \
     > "$SYNC_TMPDIR/whatjobs_sg.log" 2>&1 &
 PID_WJ_SG=$!
 
-timeout 100m "$PYTHON" -u sync_lensa_jobs.py \
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_lensa_jobs.py \
     > "$SYNC_TMPDIR/lensa.log" 2>&1 &
 PID_LENSA=$!
 
@@ -70,22 +71,22 @@ wait $PID_LENSA; EXIT_LENSA=$?
 # Print logs in order (stdout + append to log file)
 log "--- Hirebase output ---"
 cat "$SYNC_TMPDIR/hirebase.log" | tee -a "$LOG_FILE"
-if   [ $EXIT_HB -eq 124 ]; then log "WARNING: Hirebase timed out after 90 min"
+if   [ $EXIT_HB -eq 124 ]; then log "WARNING: Hirebase timed out after ${IMPORT_TIMEOUT_MIN} min"
 elif [ $EXIT_HB -ne 0 ];   then log "ERROR: Hirebase exited with code $EXIT_HB"; fi
 
 log "--- WhatJobs US output ---"
 cat "$SYNC_TMPDIR/whatjobs_us.log" | tee -a "$LOG_FILE"
-if   [ $EXIT_WJ_US -eq 124 ]; then log "WARNING: WhatJobs US timed out after 100 min"
+if   [ $EXIT_WJ_US -eq 124 ]; then log "WARNING: WhatJobs US timed out after ${IMPORT_TIMEOUT_MIN} min"
 elif [ $EXIT_WJ_US -ne 0 ];   then log "ERROR: WhatJobs US exited with code $EXIT_WJ_US"; fi
 
 log "--- WhatJobs SG output ---"
 cat "$SYNC_TMPDIR/whatjobs_sg.log" | tee -a "$LOG_FILE"
-if   [ $EXIT_WJ_SG -eq 124 ]; then log "WARNING: WhatJobs SG timed out after 100 min"
+if   [ $EXIT_WJ_SG -eq 124 ]; then log "WARNING: WhatJobs SG timed out after ${IMPORT_TIMEOUT_MIN} min"
 elif [ $EXIT_WJ_SG -ne 0 ];   then log "ERROR: WhatJobs SG exited with code $EXIT_WJ_SG"; fi
 
 log "--- Lensa output ---"
 cat "$SYNC_TMPDIR/lensa.log" | tee -a "$LOG_FILE"
-if   [ $EXIT_LENSA -eq 124 ]; then log "WARNING: Lensa timed out after 100 min"
+if   [ $EXIT_LENSA -eq 124 ]; then log "WARNING: Lensa timed out after ${IMPORT_TIMEOUT_MIN} min"
 elif [ $EXIT_LENSA -ne 0 ];   then log "ERROR: Lensa exited with code $EXIT_LENSA"; fi
 
 log "Phase 1 complete."

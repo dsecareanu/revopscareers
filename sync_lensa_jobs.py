@@ -786,8 +786,16 @@ def main() -> None:
         name: mid for name, mid in state.get("logo_ids", {}).items()
     }
 
-    for job_title in keyword_list:
+    # Resume from the keyword the previous run was on (runs can be cut short by the
+    # timeout), so the later keywords in the list get searched too.
+    start = state.get("next_keyword", 0) % len(keyword_list) if not args.keywords else 0
+    if start:
+        print(f"  Resuming at keyword {start + 1}/{len(keyword_list)}")
+    for n, job_title in enumerate(keyword_list[start:] + keyword_list[:start]):
         print(f"\n[Keyword] {job_title}")
+        if not args.dry_run:
+            state["next_keyword"] = (start + n) % len(keyword_list)
+            save_state(state)
 
         # Two passes: standard (US-wide, no location filter) + remote only
         for remote_only in [False, True]:
@@ -887,6 +895,7 @@ def main() -> None:
 
     # Final state save (catches any remaining changes from dry-run skips etc.)
     if not args.dry_run:
+        state["next_keyword"] = 0  # full pass completed
         state["imported_ids"] = list(imported_ids)
         state["last_run"]     = datetime.now().isoformat()
         save_state(state)
