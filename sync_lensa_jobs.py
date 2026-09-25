@@ -173,6 +173,12 @@ LENSA_JOB_TITLES = [
     "Product Operations",
     # Ad Operations
     "Ad Operations",
+    # Sales Planning & Compensation / CPQ
+    "Sales Compensation",
+    "Incentive Compensation",
+    "Sales Planning",
+    "Sales Strategy",
+    "CPQ",
 ]
 
 STATE_FILE      = Path(__file__).parent / "imported_lensa.json"
@@ -229,10 +235,18 @@ CATEGORY_KEYWORDS: dict[int, list[str]] = {
            "marketing automation", "marketing analytics", "marketing systems",
            "marketing technology", "martech", "marketing enablement",
            "marketing intelligence", "demand generation operations", "crm marketing",
-           "marketing data"],
+           "marketing data", "crm manager", "crm analyst"],
     23:   ["sales operations", "sales ops", "salesops", "sales enablement", "deal desk",
            "sales analytics", "sales systems", "sales technology", "salestech",
-           "sales reporting", "sales process", "sales strategy", "sales planning"],
+           "sales reporting", "sales process", "sales strategy", "sales planning",
+           # Sales planning & compensation
+           "sales compensation", "incentive compensation", "commissions analyst",
+           "commission analyst", "sales commission", "territory planning", "quota planning",
+           "sales excellence",
+           # CRM & GTM systems (searched by the CRM cluster but previously matched no category)
+           "salesforce administrator", "salesforce admin", "salesforce developer",
+           "crm administrator", "hubspot administrator",
+           "hubspot admin", "cpq"],
     21:   ["revenue operations", "revops", "revenue ops", "rev ops", "revenue enablement",
            "revenue strategy", "revenue architect", "revenue intelligence",
            "revenue finance", "revenue accounting"],

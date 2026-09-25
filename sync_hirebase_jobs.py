@@ -104,7 +104,7 @@ SEARCH_CLUSTERS: dict[str, list[str]] = {
     "CRM & GTM Systems": [
         "salesforce administrator", "salesforce developer", "CRM administrator",
         "CRM manager", "CRM analyst", "HubSpot administrator", "GTM systems",
-        "sales technology",
+        "sales technology", "CPQ", "Salesforce CPQ",
     ],
     "Marketing Operations": [
         "marketing operations", "marketing ops", "marketingops", "marketing automation",
@@ -183,6 +183,11 @@ SEARCH_CLUSTERS: dict[str, list[str]] = {
         "ad operations manager", "ad operations specialist",
         "advertising operations manager", "programmatic operations",
         "campaign operations", "media operations",
+    ],
+    "Sales Planning & Compensation": [
+        "sales compensation", "incentive compensation", "commissions analyst",
+        "sales commissions", "sales planning", "territory planning", "quota planning",
+        "sales strategy", "sales excellence",
     ],
 }
 
@@ -291,10 +296,18 @@ CATEGORY_KEYWORDS: dict[int, list[str]] = {
            "marketing automation", "marketing analytics", "marketing systems",
            "marketing technology", "martech", "marketing enablement",
            "marketing intelligence", "demand generation operations", "crm marketing",
-           "marketing data"],
+           "marketing data", "crm manager", "crm analyst"],
     23:   ["sales operations", "sales ops", "salesops", "sales enablement", "deal desk",
            "sales analytics", "sales systems", "sales technology", "salestech",
-           "sales reporting", "sales process", "sales strategy", "sales planning"],
+           "sales reporting", "sales process", "sales strategy", "sales planning",
+           # Sales planning & compensation
+           "sales compensation", "incentive compensation", "commissions analyst",
+           "commission analyst", "sales commission", "territory planning", "quota planning",
+           "sales excellence",
+           # CRM & GTM systems (searched by the CRM cluster but previously matched no category)
+           "salesforce administrator", "salesforce admin", "salesforce developer",
+           "crm administrator", "hubspot administrator",
+           "hubspot admin", "cpq"],
     21:   ["revenue operations", "revops", "revenue ops", "rev ops", "revenue enablement",
            "revenue strategy", "revenue architect", "revenue intelligence",
            "revenue finance", "revenue accounting"],
