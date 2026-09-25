@@ -112,3 +112,9 @@ log "Step 5/5 — Missing tags patch (last 1 day)..."
 "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
 
 log "===== Daily sync complete ====="
+
+# Fail the run (GitHub Action goes red) if a WhatJobs import errored out.
+# Timeouts (124) stay warnings, matching the other steps.
+for code in $EXIT_WJ_US $EXIT_WJ_SG; do
+    if [ $code -ne 0 ] && [ $code -ne 124 ]; then exit 1; fi
+done

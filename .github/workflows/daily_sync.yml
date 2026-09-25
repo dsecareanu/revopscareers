@@ -6,6 +6,9 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch: # allow manual runs from the GitHub Actions UI
 
+permissions:
+  contents: write   # lets the bot push the dedup cache commit
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -35,6 +38,7 @@ jobs:
         run: bash daily_sync.sh
 
       - name: Commit updated dedup cache
+        if: always()   # keep dedup state even if the sync step failed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

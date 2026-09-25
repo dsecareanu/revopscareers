@@ -186,6 +186,7 @@ _STATE_FILE      = STATE_FILE
 N8N_WEBHOOK_URL = "https://n8n.tigros.io/webhook/roc-insert-row"
 
 PAGE_SIZE        = 50   # WhatJobs max per page
+KEYWORD_CHUNK_SIZE = 30 # keywords per query — the full OR list makes WhatJobs return 504
 MAX_PAGES        = 10   # default cap for new-only runs
 AGE_DAYS_MAX     = 2    # import jobs posted within last N days
 REFRESH_DAYS_DEF = 30   # refresh jobs imported within last N days
@@ -616,12 +617,12 @@ def extract_domain(company_name: str) -> str:
 # WHATJOBS API FETCH
 # =============================================================================
 
-def fetch_whatjobs_page(page: int) -> ET.Element:
+def fetch_whatjobs_page(page: int, keywords: str) -> ET.Element:
     params = {
         "publisher":  _PUBLISHER_ID,
         "user_ip":    WHATJOBS_USER_IP,
         "user_agent": WHATJOBS_USER_AGENT,
-        "keyword":    WHATJOBS_KEYWORDS,
+        "keyword":    keywords,
         "limit":      str(PAGE_SIZE),
         "page":       str(page),
     }
@@ -944,181 +945,191 @@ def main() -> None:
 
     today = _today()
 
-    for page in range(1, page_cap + 1):
-        print(f"[Page {page}/{page_cap}] Fetching from WhatJobs...")
-        try:
-            root = fetch_whatjobs_page(page)
-        except Exception as e:
-            print(f"  WhatJobs error: {e}")
-            break
+    kw_list = WHATJOBS_KEYWORDS.split(" OR ")
+    kw_chunks = [" OR ".join(kw_list[i:i + KEYWORD_CHUNK_SIZE])
+                 for i in range(0, len(kw_list), KEYWORD_CHUNK_SIZE)]
+    failed_chunks = 0
 
-        total     = root.findtext("total") or "?"
-        last_page = root.findtext("last_page") or "?"
-        job_els   = root.findall(".//job")
-        print(f"  {len(job_els)} jobs (total: {total}, last page: {last_page})")
+    for chunk_no, keywords in enumerate(kw_chunks, 1):
+        print(f"=== Keyword group {chunk_no}/{len(kw_chunks)} ===")
+        stale_pages = 0
+        for page in range(1, page_cap + 1):
+            print(f"[Page {page}/{page_cap}] Fetching from WhatJobs...")
+            try:
+                root = fetch_whatjobs_page(page, keywords)
+            except Exception as e:
+                print(f"  WhatJobs error: {e}")
+                if page == 1:
+                    failed_chunks += 1
+                break
 
-        if not job_els:
-            print("  No jobs returned — done.")
-            break
+            total     = root.findtext("total") or "?"
+            last_page = root.findtext("last_page") or "?"
+            job_els   = root.findall(".//job")
+            print(f"  {len(job_els)} jobs (total: {total}, last page: {last_page})")
 
-        page_activity = 0   # new imports + refreshes this page
+            if not job_els:
+                print("  No jobs returned — done.")
+                break
 
-        for job in [parse_job(el) for el in job_els]:
-            app_url = job["url"]
-            title   = job["title"]
-            company = job["company"]
+            page_activity = 0   # new imports + refreshes this page
 
-            # ----------------------------------------------------------------
-            # KNOWN JOB — check for refresh
-            # ----------------------------------------------------------------
-            if app_url in jobs_state:
-                rec = jobs_state[app_url]
+            for job in [parse_job(el) for el in job_els]:
+                app_url = job["url"]
+                title   = job["title"]
+                company = job["company"]
 
-                # Only refresh if within refresh window and wp_post_id is known
-                if (args.refresh_days > 0
-                        and rec.get("wp_post_id")
-                        and rec.get("imported_at", "") >= refresh_cutoff):
+                # ----------------------------------------------------------------
+                # KNOWN JOB — check for refresh
+                # ----------------------------------------------------------------
+                if app_url in jobs_state:
+                    rec = jobs_state[app_url]
 
-                    changes = {}
-                    if job["title"]   != rec.get("title", ""):
-                        changes["title"]   = job["title"]
-                    if job["snippet"] != rec.get("snippet", ""):
-                        changes["snippet"] = job["snippet"]
-                    if job["salary"]  != rec.get("salary", ""):
-                        changes["salary"]  = job["salary"]
-                    if job["location"] != rec.get("location", ""):
-                        changes["location"] = job["location"]
+                    # Only refresh if within refresh window and wp_post_id is known
+                    if (args.refresh_days > 0
+                            and rec.get("wp_post_id")
+                            and rec.get("imported_at", "") >= refresh_cutoff):
 
-                    if changes:
-                        fields = ", ".join(changes.keys())
-                        print(f"  ~ {title} @ {company}  [refresh: {fields}]")
-                        ok = update_wp_job(rec["wp_post_id"], changes, args.dry_run)
-                        if ok:
-                            if not args.dry_run:
-                                rec.update(changes)
-                            refresh_count += 1
-                            page_activity += 1
+                        changes = {}
+                        if job["title"]   != rec.get("title", ""):
+                            changes["title"]   = job["title"]
+                        if job["snippet"] != rec.get("snippet", ""):
+                            changes["snippet"] = job["snippet"]
+                        if job["salary"]  != rec.get("salary", ""):
+                            changes["salary"]  = job["salary"]
+                        if job["location"] != rec.get("location", ""):
+                            changes["location"] = job["location"]
+
+                        if changes:
+                            fields = ", ".join(changes.keys())
+                            print(f"  ~ {title} @ {company}  [refresh: {fields}]")
+                            ok = update_wp_job(rec["wp_post_id"], changes, args.dry_run)
+                            if ok:
+                                if not args.dry_run:
+                                    rec.update(changes)
+                                refresh_count += 1
+                                page_activity += 1
+                            else:
+                                error_count += 1
                         else:
-                            error_count += 1
+                            skip_count += 1
+
+                        # Always update last_checked
+                        if not args.dry_run:
+                            rec["last_checked"] = today
                     else:
                         skip_count += 1
+                    continue
 
-                    # Always update last_checked
-                    if not args.dry_run:
-                        rec["last_checked"] = today
-                else:
-                    skip_count += 1
-                continue
-
-            # ----------------------------------------------------------------
-            # KNOWN IN WP (imported by another script) — just skip
-            # ----------------------------------------------------------------
-            if app_url in existing_urls:
-                skip_count += 1
-                continue
-
-            job_key = (
-                _norm_key(company),
-                _norm_key(title),
-                _norm_key(_build_loc_str(job.get("location", ""))),
-            )
-            if job_key in existing_keys:
-                skip_count += 1
-                continue
-
-            # ----------------------------------------------------------------
-            # NEW JOB — import if within max_age
-            # ----------------------------------------------------------------
-            if job["age_days"] > args.max_age:
-                skip_count += 1
-                continue
-
-            # Blocklists
-            title_lower   = title.lower()
-            company_lower = company.lower()
-            if any(t in title_lower for t in TITLE_BLOCKLIST):
-                skip_count += 1
-                continue
-            if any(t in company_lower for t in COMPANY_BLOCKLIST):
-                skip_count += 1
-                continue
-            if any(t in company_lower for t in COMPANY_INDUSTRY_BLOCKLIST):
-                if not any(s in title_lower for s in SENIOR_TITLE_KEYWORDS):
+                # ----------------------------------------------------------------
+                # KNOWN IN WP (imported by another script) — just skip
+                # ----------------------------------------------------------------
+                if app_url in existing_urls:
                     skip_count += 1
                     continue
 
-            category_ids = assign_categories(title)
-            if not category_ids:
-                skip_count += 1
-                continue
+                job_key = (
+                    _norm_key(company),
+                    _norm_key(title),
+                    _norm_key(_build_loc_str(job.get("location", ""))),
+                )
+                if job_key in existing_keys:
+                    skip_count += 1
+                    continue
 
-            cat_name = _CAT_NAMES.get(category_ids[0], "?")
-            print(f"  + {title} @ {company}  [{cat_name}]  {job['location']}, {_COUNTRY_NAME}")
+                # ----------------------------------------------------------------
+                # NEW JOB — import if within max_age
+                # ----------------------------------------------------------------
+                if job["age_days"] > args.max_age:
+                    skip_count += 1
+                    continue
 
-            # Logo
-            media_id: int | None = None
-            if not args.skip_logo and not args.dry_run:
-                if company in logo_cache:
-                    media_id = logo_cache[company]
-                else:
-                    domain   = extract_domain(company)
-                    media_id = resolve_logo(company, domain, args.dry_run)
-                    logo_cache[company] = media_id
-                    if media_id:
-                        state["logo_ids"][company] = media_id
-                        notify_n8n("logos", {
-                            "company_name": company,
-                            "logo_id":      media_id,
-                            "logo_url":     "",
+                # Blocklists
+                title_lower   = title.lower()
+                company_lower = company.lower()
+                if any(t in title_lower for t in TITLE_BLOCKLIST):
+                    skip_count += 1
+                    continue
+                if any(t in company_lower for t in COMPANY_BLOCKLIST):
+                    skip_count += 1
+                    continue
+                if any(t in company_lower for t in COMPANY_INDUSTRY_BLOCKLIST):
+                    if not any(s in title_lower for s in SENIOR_TITLE_KEYWORDS):
+                        skip_count += 1
+                        continue
+
+                category_ids = assign_categories(title)
+                if not category_ids:
+                    skip_count += 1
+                    continue
+
+                cat_name = _CAT_NAMES.get(category_ids[0], "?")
+                print(f"  + {title} @ {company}  [{cat_name}]  {job['location']}, {_COUNTRY_NAME}")
+
+                # Logo
+                media_id: int | None = None
+                if not args.skip_logo and not args.dry_run:
+                    if company in logo_cache:
+                        media_id = logo_cache[company]
+                    else:
+                        domain   = extract_domain(company)
+                        media_id = resolve_logo(company, domain, args.dry_run)
+                        logo_cache[company] = media_id
+                        if media_id:
+                            state["logo_ids"][company] = media_id
+                            notify_n8n("logos", {
+                                "company_name": company,
+                                "logo_id":      media_id,
+                                "logo_url":     "",
+                            })
+
+                result = create_wp_job(job, media_id, args.dry_run)
+                if result:
+                    if not args.dry_run:
+                        post_id = result.get("id", "?")
+                        print(f"    [wp] post ID {post_id}")
+                        jobs_state[app_url] = {
+                            "wp_post_id":   post_id,
+                            "imported_at":  today,
+                            "last_checked": today,
+                            "title":        job["title"],
+                            "snippet":      job["snippet"],
+                            "salary":       job["salary"],
+                            "location":     job["location"],
+                        }
+                        existing_urls.add(app_url)
+                        existing_keys.add(job_key)
+                        notify_n8n("jobs", {
+                            "job_title":        title,
+                            "company_name":     company,
+                            "job_url":          f"{SITE_URL}/jobs/{_slugify(title)}/",
+                            "application_link": app_url,
+                            "posted_at":        today,
                         })
+                    new_count    += 1
+                    page_activity += 1
+                else:
+                    error_count += 1
 
-            result = create_wp_job(job, media_id, args.dry_run)
-            if result:
-                if not args.dry_run:
-                    post_id = result.get("id", "?")
-                    print(f"    [wp] post ID {post_id}")
-                    jobs_state[app_url] = {
-                        "wp_post_id":   post_id,
-                        "imported_at":  today,
-                        "last_checked": today,
-                        "title":        job["title"],
-                        "snippet":      job["snippet"],
-                        "salary":       job["salary"],
-                        "location":     job["location"],
-                    }
-                    existing_urls.add(app_url)
-                    existing_keys.add(job_key)
-                    notify_n8n("jobs", {
-                        "job_title":        title,
-                        "company_name":     company,
-                        "job_url":          f"{SITE_URL}/jobs/{_slugify(title)}/",
-                        "application_link": app_url,
-                        "posted_at":        today,
-                    })
-                new_count    += 1
-                page_activity += 1
+                if new_count > 0 and new_count % WP_BATCH_SIZE == 0 and not args.dry_run:
+                    print(f"  [batch] {new_count} posts published — pausing {WP_BATCH_PAUSE}s...")
+                    time.sleep(WP_BATCH_PAUSE)
+
+            # Stale page: no new imports or refreshes
+            if page_activity == 0:
+                stale_pages += 1
+                if stale_pages >= 3:
+                    print("  Too many consecutive inactive pages — stopping.")
+                    break
             else:
-                error_count += 1
+                stale_pages = 0
 
-            if new_count > 0 and new_count % WP_BATCH_SIZE == 0 and not args.dry_run:
-                print(f"  [batch] {new_count} posts published — pausing {WP_BATCH_PAUSE}s...")
-                time.sleep(WP_BATCH_PAUSE)
-
-        # Stale page: no new imports or refreshes
-        if page_activity == 0:
-            stale_pages += 1
-            if stale_pages >= 3:
-                print("  Too many consecutive inactive pages — stopping.")
-                break
-        else:
-            stale_pages = 0
-
-        try:
-            if page >= int(last_page):
-                print("  Reached last page.")
-                break
-        except (ValueError, TypeError):
-            pass
+            try:
+                if page >= int(last_page):
+                    print("  Reached last page.")
+                    break
+            except (ValueError, TypeError):
+                pass
 
     # Persist state
     if not args.dry_run:
@@ -1132,6 +1143,10 @@ def main() -> None:
     print(f"  Refreshed:{refresh_count}")
     print(f"  Skipped:  {skip_count}  (already imported, too old, or off-topic)")
     print(f"  Errors:   {error_count}")
+
+    if failed_chunks == len(kw_chunks):
+        print("ERROR: WhatJobs API failed on every keyword group — nothing fetched.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
