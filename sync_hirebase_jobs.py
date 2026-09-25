@@ -840,54 +840,34 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
     print("Loading existing jobs from WordPress...")
     urls: set[str] = set()
     keys: set[tuple[str, str, str]] = set()
-    page = 1
-    while True:
-        try:
-            r = wp.get(f"{WP_API}/job-listings", params={
-                "per_page": 100,
-                "page": page,
-                "status": "publish,draft",
-                "_fields": "id,slug,meta",
-            }, timeout=30)
-            r.raise_for_status()
-            batch = r.json()
-        except Exception as e:
-            print(f"  Warning: could not load WP jobs page {page}: {e}")
-            break
+    try:
+        r = wp.get(f"{SITE_URL}/wp-json/roc/v1/job-dedup-keys", timeout=120)
+        r.raise_for_status()
+        rows = r.json()
+    except Exception as e:
+        print(f"  ERROR: could not load existing jobs: {e}")
+        sys.exit(1)
 
-        if not batch:
-            break
-
-        for post in batch:
-            meta = post.get("meta") or {}
-            app  = meta.get("_application", "")
-            if isinstance(app, list):
-                app = app[0] if app else ""
-            if app:
-                urls.add(str(app).strip())
-            company  = _norm_key(meta.get("_company_name", "") or "")
-            location = _norm_key(meta.get("_job_location", "") or "")
-            # Derive title from slug: strip company prefix and location suffix
-            slug = post.get("slug", "")
-            if company and slug:
-                # title lives between company prefix and location/suffix in slug
-                slug_norm = slug.replace("-", " ")
-                company_slug = re.sub(r"[^\w\s]", "", company)
-                if slug_norm.startswith(company_slug):
-                    slug_norm = slug_norm[len(company_slug):].strip()
-                if location:
-                    loc_slug = re.sub(r"[^\w\s]", "", location)
-                    if slug_norm.endswith(loc_slug):
-                        slug_norm = slug_norm[: -len(loc_slug)].strip()
-                if company and slug_norm:
-                    keys.add((company, slug_norm, location))
-
-        total_pages = int(r.headers.get("X-WP-TotalPages", 1))
-        print(f"  Page {page}/{total_pages} — {len(urls)} URLs / {len(keys)} keys", end="\r")
-        if page >= total_pages:
-            break
-        page += 1
-        time.sleep(0.1)
+    for row in rows:
+        app = row.get("application") or ""
+        if app:
+            urls.add(str(app).strip())
+        company  = _norm_key(row.get("company") or "")
+        location = _norm_key(row.get("location") or "")
+        # Derive title from slug: strip company prefix and location suffix
+        slug = row.get("slug") or ""
+        if company and slug:
+            # title lives between company prefix and location/suffix in slug
+            slug_norm = slug.replace("-", " ")
+            company_slug = re.sub(r"[^\w\s]", "", company)
+            if slug_norm.startswith(company_slug):
+                slug_norm = slug_norm[len(company_slug):].strip()
+            if location:
+                loc_slug = re.sub(r"[^\w\s]", "", location)
+                if slug_norm.endswith(loc_slug):
+                    slug_norm = slug_norm[: -len(loc_slug)].strip()
+            if company and slug_norm:
+                keys.add((company, slug_norm, location))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys

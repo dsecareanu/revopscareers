@@ -714,39 +714,18 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 def load_existing_application_urls() -> set[str]:
     print("Loading existing application URLs from WordPress...")
     urls: set[str] = set()
-    page = 1
-    while True:
-        try:
-            r = wp.get(f"{WP_API}/job-listings", params={
-                "per_page": 100,
-                "page": page,
-                "status": "publish,draft",
-                "_fields": "id,meta",
-            }, timeout=30)
-            r.raise_for_status()
-            batch = r.json()
-        except Exception as e:
-            print(f"  Warning: could not load WP jobs page {page}: {e}")
-            break
+    try:
+        r = wp.get(f"{SITE_URL}/wp-json/roc/v1/job-dedup-keys", timeout=120)
+        r.raise_for_status()
+        rows = r.json()
+    except Exception as e:
+        print(f"  ERROR: could not load existing jobs: {e}")
+        sys.exit(1)
 
-        if not batch:
-            break
-
-        for post in batch:
-            meta = post.get("meta") or {}
-            app  = meta.get("_application", "")
-            if isinstance(app, list):
-                app = app[0] if app else ""
-            if app:
-                urls.add(str(app).strip())
-
-        total_pages = int(r.headers.get("X-WP-TotalPages", 1))
-        print(f"  Page {page}/{total_pages} — {len(urls)} URLs collected", end="\r")
-
-        if page >= total_pages:
-            break
-        page += 1
-        time.sleep(0.1)
+    for row in rows:
+        app = row.get("application") or ""
+        if app:
+            urls.add(str(app).strip())
 
     print(f"\n  Done. {len(urls)} existing application URLs loaded.\n")
     return urls
