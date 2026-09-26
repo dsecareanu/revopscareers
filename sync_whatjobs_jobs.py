@@ -575,7 +575,8 @@ def _fetch_url(url: str) -> tuple[bytes | None, str]:
         r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code == 200:
             ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-            if ct.startswith("image/"):
+            # Skip .ico favicons (tiny, and WP rejects them) — let the next source try
+            if ct.startswith("image/") and ct not in ("image/x-icon", "image/vnd.microsoft.icon"):
                 return r.content, ct
     except Exception:
         pass
