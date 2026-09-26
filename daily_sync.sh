@@ -46,7 +46,7 @@ log "===== Daily sync started (mode: $MODE) ====="
 # =============================================================================
 log "Phase 1 — Starting parallel imports (timeout ${IMPORT_TIMEOUT_MIN}m each)..."
 
-timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_hirebase_jobs.py --since 1 --max-new 600 \
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_hirebase_jobs.py --since 3 --max-new 1200 \
     > "$SYNC_TMPDIR/hirebase.log" 2>&1 &
 PID_HB=$!
 

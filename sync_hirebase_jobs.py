@@ -191,6 +191,17 @@ SEARCH_CLUSTERS: dict[str, list[str]] = {
     ],
 }
 
+# Core clusters: no per-run limit and every page is scanned (new jobs are scattered
+# across all pages). Broad clusters return thousands of loosely related jobs, so each
+# gets a small per-run budget and keeps the stale-page exit — otherwise they use up
+# --max-new and the core clusters are only reached every 1.5-2 days.
+CORE_CLUSTERS = {
+    "Revenue Operations", "Sales Operations", "Marketing Operations", "CRM & GTM Systems",
+    "Sales Planning & Compensation", "Demand Generation", "Web Operations",
+    "Product Operations", "People Operations", "Ad Operations",
+}
+BROAD_CLUSTER_MAX_NEW = 40   # new jobs per broad cluster per run
+
 PAGE_SIZE        = 100   # jobs per page (100 = max)
 CLUSTER_PAGE_CAP = 25    # neural-search hard cap: 2500 results / 100 per page
 
@@ -959,6 +970,8 @@ def main() -> None:
                         help="Also resolve logos during --dry-run (slower but shows logo results)")
     parser.add_argument("--max-new", type=int, default=None, metavar="N",
                         help="Stop after publishing N new jobs total (saves state and exits cleanly)")
+    parser.add_argument("--core-only", action="store_true",
+                        help="Only search CORE_CLUSTERS (for backfills); leaves the cluster rotation untouched")
     args = parser.parse_args()
 
     if not HIREBASE_API_KEY:
@@ -1010,17 +1023,23 @@ def main() -> None:
 
     # Resume from the cluster the previous run was working on (it may have been cut
     # short by the timeout or --max-new), so every cluster gets searched across runs.
-    start = state.get("next_cluster", 0) % num_clusters
+    start = 0 if args.core_only else state.get("next_cluster", 0) % num_clusters
     clusters = list(SEARCH_CLUSTERS.items())
     if start:
         print(f"  Resuming at cluster {start + 1}/{num_clusters}")
     for n, (cluster_name, cluster_titles) in enumerate(clusters[start:] + clusters[:start]):
         cluster_idx = (start + n) % num_clusters + 1
-        print(f"\n[Cluster {cluster_idx}/{num_clusters}: {cluster_name}]")
-        if not args.dry_run:
+        is_core = cluster_name in CORE_CLUSTERS
+        if args.core_only and not is_core:
+            continue
+        print(f"\n[Cluster {cluster_idx}/{num_clusters}: {cluster_name}]"
+              f"{'' if is_core else f' (broad — max {BROAD_CLUSTER_MAX_NEW} new)'}")
+        if not args.dry_run and not args.core_only:
             state["next_cluster"] = cluster_idx - 1
             save_state(state)
         stale_pages = 0  # reset per cluster
+        cluster_new = 0
+        cluster_done = False
 
         for page in range(1, cluster_page_cap + 1):
             print(f"  Page {page}/{cluster_page_cap}"
@@ -1148,8 +1167,9 @@ def main() -> None:
                     existing_urls.add(app_url)
                     existing_keys.add(job_key)
                     existing_keys.add(stored_key)
-                    new_count += 1
-                    page_new  += 1
+                    new_count   += 1
+                    page_new    += 1
+                    cluster_new += 1
 
                     # Batch pause every WP_BATCH_SIZE posts to avoid overloading the server
                     if not args.dry_run and new_count % WP_BATCH_SIZE == 0:
@@ -1159,6 +1179,10 @@ def main() -> None:
                     if args.max_new and new_count >= args.max_new:
                         print(f"  --max-new {args.max_new} reached — stopping.")
                         max_new_reached = True
+                        break
+                    if not is_core and cluster_new >= BROAD_CLUSTER_MAX_NEW:
+                        print(f"  Broad-cluster budget ({BROAD_CLUSTER_MAX_NEW}) reached — next cluster.")
+                        cluster_done = True
                         break
                 else:
                     error_count += 1
@@ -1172,7 +1196,7 @@ def main() -> None:
                 save_state(state)
 
             # Early-exit conditions within this cluster
-            if max_new_reached:
+            if max_new_reached or cluster_done:
                 break
 
             if len(jobs) < PAGE_SIZE:
@@ -1180,7 +1204,7 @@ def main() -> None:
                 break
 
             stale_limit = STALE_PAGE_LIMIT_DATE if last_run_date else STALE_PAGE_LIMIT
-            if page_new == 0:
+            if page_new == 0 and not is_core:
                 stale_pages += 1
                 print(f"  All skipped ({stale_pages}/{stale_limit} stale pages)")
                 if stale_pages >= stale_limit:
@@ -1195,7 +1219,7 @@ def main() -> None:
             break
     else:
         # Full pass completed — next run starts from the first cluster again
-        if not args.dry_run:
+        if not args.dry_run and not args.core_only:
             state["next_cluster"] = 0
             save_state(state)
 
