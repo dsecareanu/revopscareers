@@ -971,7 +971,7 @@ def main() -> None:
     parser.add_argument("--max-new", type=int, default=None, metavar="N",
                         help="Stop after publishing N new jobs total (saves state and exits cleanly)")
     parser.add_argument("--core-only", action="store_true",
-                        help="Only search CORE_CLUSTERS (for backfills); leaves the cluster rotation untouched")
+                        help="Only search CORE_CLUSTERS (for backfills)")
     args = parser.parse_args()
 
     if not HIREBASE_API_KEY:
@@ -1021,22 +1021,15 @@ def main() -> None:
         name: mid for name, mid in state.get("logo_ids", {}).items()
     }
 
-    # Resume from the cluster the previous run was working on (it may have been cut
-    # short by the timeout or --max-new), so every cluster gets searched across runs.
-    start = 0 if args.core_only else state.get("next_cluster", 0) % num_clusters
-    clusters = list(SEARCH_CLUSTERS.items())
-    if start:
-        print(f"  Resuming at cluster {start + 1}/{num_clusters}")
-    for n, (cluster_name, cluster_titles) in enumerate(clusters[start:] + clusters[:start]):
-        cluster_idx = (start + n) % num_clusters + 1
+    # Core (ops) clusters first on every run, then the broad ones, so the ops jobs are
+    # never cut off by --max-new or the timeout.
+    clusters = sorted(SEARCH_CLUSTERS.items(), key=lambda c: c[0] not in CORE_CLUSTERS)
+    for cluster_idx, (cluster_name, cluster_titles) in enumerate(clusters, start=1):
         is_core = cluster_name in CORE_CLUSTERS
         if args.core_only and not is_core:
             continue
         print(f"\n[Cluster {cluster_idx}/{num_clusters}: {cluster_name}]"
               f"{'' if is_core else f' (broad — max {BROAD_CLUSTER_MAX_NEW} new)'}")
-        if not args.dry_run and not args.core_only:
-            state["next_cluster"] = cluster_idx - 1
-            save_state(state)
         stale_pages = 0  # reset per cluster
         cluster_new = 0
         cluster_done = False
@@ -1217,11 +1210,6 @@ def main() -> None:
 
         if max_new_reached:
             break
-    else:
-        # Full pass completed — next run starts from the first cluster again
-        if not args.dry_run and not args.core_only:
-            state["next_cluster"] = 0
-            save_state(state)
 
     print()
     prefix = "[DRY RUN] " if args.dry_run else ""
