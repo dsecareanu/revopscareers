@@ -600,6 +600,8 @@ def parse_lensa_job(raw: dict, remote_only: bool) -> dict:
     """Normalise a raw Lensa job_advert dict into the internal job format."""
     city  = (raw.get("city") or "").strip()
     state = (raw.get("state") or "").strip()
+    # The standard pass also returns remote jobs, with city/state set to "Remote"
+    remote_only = remote_only or city.lower() == "remote"
 
     if remote_only or not city:
         location = "Remote"
