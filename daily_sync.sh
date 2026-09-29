@@ -15,6 +15,7 @@ MODE="${1:-full}"   # full = imports + cleanup, imports = Phase 1 only
 IMPORT_TIMEOUT_MIN=240   # per import script; runs are 6h apart on the server
 mkdir -p "$(dirname "$LOG_FILE")"
 PYTHON="$(which python3)"
+WP_PATH="${WP_PATH:-$HOME/revopscareers.com/public}"
 LOCK_FILE="/tmp/revopscareers_sync.lock"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
@@ -91,6 +92,13 @@ elif [ $EXIT_LENSA -ne 0 ];   then log "ERROR: Lensa exited with code $EXIT_LENS
 
 log "Phase 1 complete."
 
+# Every run: unfeature webadmin jobs older than 1 day (client jobs stay featured)
+log "Unfeature old jobs (>1 day)..."
+timeout 10m wp --path="$WP_PATH" eval-file unfeature_old_jobs.php 2>&1 | tee -a "$LOG_FILE"
+SYNC_EXIT=${PIPESTATUS[0]}
+if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Unfeature timed out after 10 min"
+elif [ $SYNC_EXIT -ne 0 ];   then log "ERROR: unfeature_old_jobs.php exited with code $SYNC_EXIT"; fi
+
 if [ "$MODE" = "imports" ]; then
     log "Imports-only run — skipping Phase 2 cleanup."
 else
@@ -99,22 +107,16 @@ else
     # Phase 2 — Cleanup (sequential, requires imports to be done)
     # =============================================================================
 
-    log "Step 1/5 — ALT text fix (last 2 days)..."
+    log "Step 1/4 — ALT text fix (last 2 days)..."
     "$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 2/5 — Unfeature old jobs (>1 day)..."
-    timeout 60m "$PYTHON" -u unfeature_old_jobs.py 2>&1 | tee -a "$LOG_FILE"
-    SYNC_EXIT=${PIPESTATUS[0]}
-    if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Unfeature timed out after 60 min"
-    elif [ $SYNC_EXIT -ne 0 ];   then log "ERROR: unfeature_old_jobs.py exited with code $SYNC_EXIT"; fi
-
-    log "Step 3/5 — Add missing logos (last 1 day)..."
+    log "Step 2/4 — Add missing logos (last 1 day)..."
     "$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 4/5 — Fallback logo patch (last 1 day)..."
+    log "Step 3/4 — Fallback logo patch (last 1 day)..."
     "$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 5/5 — Missing tags patch (last 1 day)..."
+    log "Step 4/4 — Missing tags patch (last 1 day)..."
     "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
 
 fi
