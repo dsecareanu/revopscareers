@@ -379,6 +379,7 @@ CATEGORY_KEYWORDS: dict[int, list[str]] = {
 }
 
 JOB_TYPE_INPERSON = 43
+JOB_TYPE_REMOTE   = 14
 
 _CAT_NAMES = {
     64:"CS Ops", 22:"Mktg Ops", 23:"Sales Ops", 21:"Rev Ops",
@@ -719,8 +720,13 @@ def _build_loc_str(location: str) -> str:
         return location
     return f"{location}, {_COUNTRY_NAME}"
 
+def is_remote_title(title: str) -> bool:
+    """The feed has no remote field; remote roles say so in the title."""
+    return bool(re.search(r"\bremote\b", title, re.I))
+
 def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None:
     category_ids = assign_categories(job["title"])
+    is_remote    = is_remote_title(job["title"])
     salary       = build_salary(job.get("salary", ""))
 
     payload: dict = {
@@ -738,7 +744,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
             "_company_twitter":      "",
             "_company_video":        "",
             "_company_facebook":     "",
-            "_remote_position":      0,
+            "_remote_position":      1 if is_remote else 0,
             "_job_expires":          build_expiry(),
             "_application_deadline": "",
             "_featured":             1 if 21 in category_ids else 0,
@@ -752,7 +758,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 
     if category_ids:
         payload["job-categories"] = category_ids
-    payload["job-types"] = [JOB_TYPE_INPERSON]
+    payload["job-types"] = [JOB_TYPE_REMOTE if is_remote else JOB_TYPE_INPERSON]
     payload["featured_media"] = media_id or FALLBACK_LOGO_ID
 
     tag_term_ids = assign_tags(
@@ -779,6 +785,7 @@ def update_wp_job(post_id: int, changes: dict, dry_run: bool) -> bool:
     payload: dict = {}
     if "title" in changes:
         payload["title"] = changes["title"]
+        payload["job-types"] = [JOB_TYPE_REMOTE if is_remote_title(changes["title"]) else JOB_TYPE_INPERSON]
     if "snippet" in changes:
         payload["content"] = changes["snippet"]
 
@@ -790,6 +797,8 @@ def update_wp_job(post_id: int, changes: dict, dry_run: bool) -> bool:
         meta["_job_salary_unit"]     = "year" if salary else ""
     if "location" in changes:
         meta["_job_location"] = _build_loc_str(changes["location"])
+    if "title" in changes:
+        meta["_remote_position"] = 1 if is_remote_title(changes["title"]) else 0
     if meta:
         payload["meta"] = meta
 
