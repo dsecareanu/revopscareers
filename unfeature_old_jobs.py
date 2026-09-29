@@ -55,7 +55,7 @@ def fetch_all_featured_jobs() -> list[dict]:
             "per_page": 100,
             "page": page,
             "status": "publish",
-            "_fields": "id,title,date,author,meta,link",
+            "_fields": "id,title,date_gmt,author,meta,link",
         }
         resp = session.get(f"{WP_API}/{POST_TYPE}", params=params)
         resp.raise_for_status()
@@ -116,7 +116,7 @@ def main():
 
     for post in featured:
         author = post.get("author")
-        post_dt = datetime.fromisoformat(post["date"]).replace(tzinfo=timezone.utc)
+        post_dt = datetime.fromisoformat(post["date_gmt"]).replace(tzinfo=timezone.utc)
         age_days = (now - post_dt).days
 
         if author != WEBADMIN_AUTHOR_ID:
