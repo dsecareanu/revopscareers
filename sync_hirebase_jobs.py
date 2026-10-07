@@ -105,6 +105,11 @@ SEARCH_CLUSTERS: dict[str, list[str]] = {
         "salesforce administrator", "salesforce developer", "CRM administrator",
         "CRM manager", "CRM analyst", "HubSpot administrator", "GTM systems",
         "sales technology", "CPQ", "Salesforce CPQ",
+        "GTM engineer", "GTM systems engineer", "revenue systems",
+    ],
+    "AI & Agent Operations": [
+        "AI operations", "agent operations", "AgentOps", "AI automation",
+        "AI agent operations", "Agentforce", "AI GTM", "AI revenue operations",
     ],
     "Marketing Operations": [
         "marketing operations", "marketing ops", "marketingops", "marketing automation",
@@ -133,7 +138,7 @@ SEARCH_CLUSTERS: dict[str, list[str]] = {
         "partner manager", "co-marketing",
     ],
     "GTM": [
-        "GTM", "go-to-market", "go to market", "GTM engineer",
+        "GTM", "go-to-market", "go to market",
         "GTM strategy", "GTM operations", "GTM lead",
     ],
     "Growth": [
@@ -318,9 +323,9 @@ CATEGORY_KEYWORDS: dict[int, list[str]] = {
            # CRM & GTM systems (searched by the CRM cluster but previously matched no category)
            "salesforce administrator", "salesforce admin", "salesforce developer",
            "crm administrator", "hubspot administrator",
-           "hubspot admin", "cpq"],
+           "hubspot admin", "cpq", "agentforce"],
     21:   ["revenue operations", "revops", "revenue ops", "rev ops", "revenue enablement",
-           "revenue strategy", "revenue architect", "revenue intelligence",
+           "revenue strategy", "revenue architect", "revenue intelligence", "revenue systems",
            "revenue finance", "revenue accounting"],
     284:  ["business operations"],
     25:   ["business development", "business development manager",
@@ -363,6 +368,9 @@ CATEGORY_KEYWORDS: dict[int, list[str]] = {
            "ad operations manager", "ad operations specialist",
            "advertising operations manager", "programmatic operations",
            "campaign operations", "media operations"],
+    1620: ["ai operations", "ai ops", "agent operations", "agentops", "agentic operations",
+           "agentic gtm", "agent development", "agent builder", "ai automation",
+           "ai revenue", "gtm ai", "ai gtm engineer", "ai gtm strategist", "ai systems lead"],
     1369: ["gtm", "go-to-market", "go to market", "gtm strategy", "gtm operations",
            "gtm lead", "market entry", "go to market strategy", "launch strategy"],
     1368: ["growth", "growth manager", "growth lead", "growth hacker",
@@ -941,7 +949,7 @@ _CAT_NAMES = {
     1435:"Web Ops", 1437:"Finance Ops", 20:"Cust Success", 500:"Data/Analytics",
     1369:"GTM", 1368:"Growth", 13:"Marketing", 19:"Sales",
     1449:"Sales Enablement", 1450:"Demand Gen",
-    1453:"People Ops", 1454:"Product Ops", 1455:"Ad Ops",
+    1453:"People Ops", 1454:"Product Ops", 1455:"Ad Ops", 1620:"AI/Agent Ops",
 }
 
 # Consecutive all-skipped pages before stopping.
