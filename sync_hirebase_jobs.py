@@ -551,12 +551,29 @@ def find_existing_square_logo(company_slug: str) -> int | None:
     """
     items = search_wp_media(company_slug)
     for item in sorted(items, key=lambda x: x.get("id", 0)):
+        if item.get("id") in PLACEHOLDER_LOGO_IDS:
+            continue
         d = item.get("media_details") or {}
         w, h = d.get("width", 0), d.get("height", 0)
         # Accept if square OR if dimensions unavailable (assume previously validated)
         if (w > 0 and h > 0 and abs(w - h) <= max(w, h) * 0.05) or (w == 0 and h == 0):
             return item["id"]
     return None
+
+
+# Letter-placeholder logos (icon.horse fallback) already in the media library —
+# never reuse them. Loaded once per run in main().
+PLACEHOLDER_LOGO_IDS: set[int] = set()
+
+
+def fetch_placeholder_logo_ids() -> set[int]:
+    try:
+        r = requests.get(f"{API_BASE}/roc/v1/placeholder-logos", timeout=30)
+        r.raise_for_status()
+        return {int(i) for i in r.json()}
+    except Exception as e:
+        print(f"  [logo] Could not load placeholder logo IDs: {e}")
+        return set()
 
 
 def upload_image_to_wp(img_bytes: bytes, filename: str, mime: str,
@@ -618,6 +635,10 @@ def _fetch_url(url: str) -> tuple[bytes | None, str]:
     try:
         r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code == 200:
+            # icon.horse answers unknown domains with a grey letter placeholder;
+            # those (only those) are served with s-maxage=300 — let the next source try
+            if "icon.horse" in url and "s-maxage=300" in r.headers.get("Cache-Control", ""):
+                return None, ""
             ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
             # Skip .ico favicons (tiny, and WP rejects them) — let the next source try
             if ct.startswith("image/") and ct not in ("image/x-icon", "image/vnd.microsoft.icon"):
@@ -1025,8 +1046,10 @@ def main() -> None:
     max_new_reached = False
     # logo_cache: company_name → media_id. Seeded from persisted state so logos
     # are never re-uploaded across runs (prevents hilton-2.jpg, hilton-3.jpg etc.)
+    PLACEHOLDER_LOGO_IDS.update(fetch_placeholder_logo_ids())
     logo_cache: dict[str, int | None] = {
         name: mid for name, mid in state.get("logo_ids", {}).items()
+        if mid not in PLACEHOLDER_LOGO_IDS
     }
 
     # Core (ops) clusters first on every run, then the broad ones, so the ops jobs are
