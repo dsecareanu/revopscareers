@@ -201,6 +201,9 @@ FALLBACK_LOGO_ID = 184  # RevOpsCareers favicon — used when no company logo is
 
 WP_BATCH_SIZE  = 10
 WP_BATCH_PAUSE = 2.0
+WP_TIMEOUT     = 60   # seconds per WP write
+WP_FAIL_PAUSE  = 60   # back off after WP times out / refuses the connection
+WP_MAX_FAILS   = 3    # consecutive WP failures before stopping the import
 
 ICON_HORSE_CDN = "https://icon.horse/icon/{domain}"
 BRANDFETCH_CDN = "https://cdn.brandfetch.io/domain/{domain}"
@@ -751,6 +754,26 @@ def is_remote_title(title: str) -> bool:
     """The feed has no remote field; remote roles say so in the title."""
     return bool(re.search(r"\bremote\b", title, re.I))
 
+_wp_fails = 0  # consecutive WP timeouts / connection errors
+
+def wp_write(url: str, payload: dict) -> requests.Response | None:
+    """POST to WP. On timeout/connection error: back off and return None.
+    No immediate retry: a timed-out create may still have gone through on the
+    server, and the next run's URL/identity dedup picks up whatever didn't."""
+    global _wp_fails
+    try:
+        resp = wp.post(url, json=payload, timeout=WP_TIMEOUT)
+    except (requests.Timeout, requests.ConnectionError) as e:
+        _wp_fails += 1
+        print(f"    [wp] {type(e).__name__} ({_wp_fails}/{WP_MAX_FAILS}) — pausing {WP_FAIL_PAUSE}s")
+        time.sleep(WP_FAIL_PAUSE)
+        return None
+    _wp_fails = 0
+    return resp
+
+def wp_down() -> bool:
+    return _wp_fails >= WP_MAX_FAILS
+
 def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None:
     category_ids = assign_categories(job["title"])
     is_remote    = is_remote_title(job["title"])
@@ -798,7 +821,9 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
     if dry_run:
         return {"dry_run": True}
 
-    resp = wp.post(f"{WP_API}/job-listings", json=payload, timeout=30)
+    resp = wp_write(f"{WP_API}/job-listings", payload)
+    if resp is None:
+        return None
     if resp.status_code in (200, 201):
         return resp.json()
     print(f"    [wp] Create failed ({resp.status_code}): {resp.text[:300]}")
@@ -832,7 +857,9 @@ def update_wp_job(post_id: int, changes: dict, dry_run: bool) -> bool:
     if not payload:
         return True   # nothing to send
 
-    resp = wp.post(f"{WP_API}/job-listings/{post_id}", json=payload, timeout=30)
+    resp = wp_write(f"{WP_API}/job-listings/{post_id}", payload)
+    if resp is None:
+        return False
     if resp.status_code in (200, 201):
         return True
     print(f"    [wp] Update failed ({resp.status_code}): {resp.text[:300]}")
@@ -852,18 +879,19 @@ def _norm_key(s: str) -> str:
     return s
 
 
-def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
     """
     Fetch all existing job_listing posts and collect:
       - existing_urls: set of _application URL strings
-      - existing_keys: set of (company, title, location) tuples for dedup by identity
+      - existing_keys: set of (company, title) tuples for dedup by identity
+        (same job posted in several cities collapses into one post)
 
     Both are used to skip already-imported jobs without relying on the local state
     file alone. existing_keys catches re-posts of the same job with a new URL.
     """
     print("Loading existing jobs from WordPress...")
     urls: set[str] = set()
-    keys: set[tuple[str, str, str]] = set()
+    keys: set[tuple[str, str]] = set()
     try:
         r = wp.get(f"{SITE_URL}/wp-json/roc/v1/job-dedup-keys", timeout=120)
         r.raise_for_status()
@@ -880,7 +908,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         location = _norm_key(row.get("location") or "")
         title    = _norm_key(row.get("title") or "")
         if company and title:
-            keys.add((company, title, location))  # stored title (reliable for prefixed slugs)
+            keys.add((company, title))  # stored title (reliable for prefixed slugs)
         slug = row.get("slug") or ""
         if company and slug:
             slug_norm = slug.replace("-", " ")
@@ -892,7 +920,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
                 if slug_norm.endswith(loc_slug):
                     slug_norm = slug_norm[: -len(loc_slug)].strip()
             if slug_norm:
-                keys.add((company, slug_norm, location))
+                keys.add((company, slug_norm))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -995,6 +1023,8 @@ def main() -> None:
     failed_chunks = 0
 
     for chunk_no, keywords in enumerate(kw_chunks, 1):
+        if wp_down():
+            break
         print(f"=== Keyword group {chunk_no}/{len(kw_chunks)} ===")
         stale_pages = 0
         for page in range(1, page_cap + 1):
@@ -1019,6 +1049,8 @@ def main() -> None:
             page_activity = 0   # new imports + refreshes this page
 
             for job in [parse_job(el) for el in job_els]:
+                if wp_down():
+                    break
                 app_url = job["url"]
                 title   = job["title"]
                 company = job["company"]
@@ -1072,11 +1104,7 @@ def main() -> None:
                     skip_count += 1
                     continue
 
-                job_key = (
-                    _norm_key(company),
-                    _norm_key(title),
-                    _norm_key(_build_loc_str(job.get("location", ""))),
-                )
+                job_key = (_norm_key(company), _norm_key(title))
                 if job_key in existing_keys:
                     skip_count += 1
                     continue
@@ -1159,6 +1187,9 @@ def main() -> None:
                     print(f"  [batch] {new_count} posts published — pausing {WP_BATCH_PAUSE}s...")
                     time.sleep(WP_BATCH_PAUSE)
 
+            if wp_down():
+                break
+
             # Stale page: no new imports or refreshes
             if page_activity == 0:
                 stale_pages += 1
@@ -1188,6 +1219,9 @@ def main() -> None:
     print(f"  Skipped:  {skip_count}  (already imported, too old, or off-topic)")
     print(f"  Errors:   {error_count}")
 
+    if wp_down():
+        print(f"ERROR: WordPress failed to respond {WP_MAX_FAILS} times in a row — import stopped early.")
+        sys.exit(1)
     if failed_chunks == len(kw_chunks):
         print("ERROR: WhatJobs API failed on every keyword group — nothing fetched.")
         sys.exit(1)

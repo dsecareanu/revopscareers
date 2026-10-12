@@ -213,6 +213,9 @@ CLUSTER_PAGE_CAP = 25    # neural-search hard cap: 2500 results / 100 per page
 # WP posting rate limits — pause after every BATCH_SIZE posts to avoid server overload
 WP_BATCH_SIZE  = 10    # posts per batch
 WP_BATCH_PAUSE = 2.0   # seconds to pause between batches
+WP_TIMEOUT     = 60    # seconds per WP write
+WP_FAIL_PAUSE  = 60    # back off after WP times out / refuses the connection
+WP_MAX_FAILS   = 3     # consecutive WP failures before stopping the import
 EXPIRY_DAYS = 60    # days from publish date until job expires on the site
 FALLBACK_LOGO_ID = 184  # RevOpsCareers favicon — used when no company logo is found
 
@@ -801,6 +804,26 @@ def build_slug(job: dict) -> str:
     return slug[:200]
 
 
+_wp_fails = 0  # consecutive WP timeouts / connection errors
+
+def wp_write(url: str, payload: dict) -> requests.Response | None:
+    """POST to WP. On timeout/connection error: back off and return None.
+    No immediate retry: a timed-out create may still have gone through on the
+    server, and the next run's URL/identity dedup picks up whatever didn't."""
+    global _wp_fails
+    try:
+        resp = wp.post(url, json=payload, timeout=WP_TIMEOUT)
+    except (requests.Timeout, requests.ConnectionError) as e:
+        _wp_fails += 1
+        print(f"    [wp] {type(e).__name__} ({_wp_fails}/{WP_MAX_FAILS}) — pausing {WP_FAIL_PAUSE}s")
+        time.sleep(WP_FAIL_PAUSE)
+        return None
+    _wp_fails = 0
+    return resp
+
+def wp_down() -> bool:
+    return _wp_fails >= WP_MAX_FAILS
+
 def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None:
     """Create a WP job_listing post. Returns created post dict or None."""
     company_data  = job.get("company_data") or {}
@@ -859,9 +882,11 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
         return {"dry_run": True}
 
     try:
-        resp = wp.post(f"{WP_API}/job-listings", json=payload, timeout=30)
+        resp = wp_write(f"{WP_API}/job-listings", payload)
     except Exception as e:
         print(f"    [wp] Create error: {e}")
+        return None
+    if resp is None:
         return None
     if resp.status_code in (200, 201):
         return resp.json()
@@ -882,18 +907,19 @@ def _norm_key(s: str) -> str:
     return s
 
 
-def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
     """
     Fetch all existing job_listing posts and collect:
       - existing_urls: set of _application URL strings
-      - existing_keys: set of (company, title, location) tuples for dedup by identity
+      - existing_keys: set of (company, title) tuples for dedup by identity
+        (same job posted in several cities collapses into one post)
 
     Both are used to skip already-imported jobs without relying on the local state
     file alone. existing_keys catches re-posts of the same job with a new URL.
     """
     print("Loading existing jobs from WordPress...")
     urls: set[str] = set()
-    keys: set[tuple[str, str, str]] = set()
+    keys: set[tuple[str, str]] = set()
     try:
         r = wp.get(f"{SITE_URL}/wp-json/roc/v1/job-dedup-keys", timeout=120)
         r.raise_for_status()
@@ -910,7 +936,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         location = _norm_key(row.get("location") or "")
         title    = _norm_key(row.get("title") or "")
         if company and title:
-            keys.add((company, title, location))  # stored title (reliable for prefixed slugs)
+            keys.add((company, title))  # stored title (reliable for prefixed slugs)
         # Derive title from slug: strip company prefix and location suffix
         slug = row.get("slug") or ""
         if company and slug:
@@ -924,7 +950,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
                 if slug_norm.endswith(loc_slug):
                     slug_norm = slug_norm[: -len(loc_slug)].strip()
             if company and slug_norm:
-                keys.add((company, slug_norm, location))
+                keys.add((company, slug_norm))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -1093,18 +1119,8 @@ def main() -> None:
                 company = job.get("company_name", "")
                 app_url = job.get("application_link", "")
 
-                job_key = (
-                    _norm_key(company),
-                    _norm_key(title),
-                    _norm_key(build_location(job)),
-                )
-
-                is_remote_job = (job.get("location_type") or "").lower() == "remote"
-                stored_key = (
-                    _norm_key(company),
-                    _norm_key(normalize_title(title)),
-                    _norm_key(build_location(job) or ("Remote" if is_remote_job else "")),
-                )
+                job_key    = (_norm_key(company), _norm_key(title))
+                stored_key = (_norm_key(company), _norm_key(normalize_title(title)))
 
                 if (hb_id in imported_ids or app_url in existing_urls
                         or job_key in existing_keys or stored_key in existing_keys):
@@ -1210,6 +1226,8 @@ def main() -> None:
                         break
                 else:
                     error_count += 1
+                    if wp_down():
+                        break
 
                 time.sleep(2.0)
 
@@ -1220,7 +1238,7 @@ def main() -> None:
                 save_state(state)
 
             # Early-exit conditions within this cluster
-            if max_new_reached or cluster_done:
+            if max_new_reached or cluster_done or wp_down():
                 break
 
             if len(jobs) < PAGE_SIZE:
@@ -1239,7 +1257,7 @@ def main() -> None:
 
             time.sleep(0.5)
 
-        if max_new_reached:
+        if max_new_reached or wp_down():
             break
 
     print()
@@ -1250,6 +1268,9 @@ def main() -> None:
     print(f"  Errors:   {error_count}")
     if args.dry_run and new_count:
         print(f"\nRun without --dry-run to import these {new_count} jobs.")
+    if wp_down():
+        print(f"ERROR: WordPress failed to respond {WP_MAX_FAILS} times in a row — import stopped early.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

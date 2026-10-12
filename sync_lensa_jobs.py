@@ -197,6 +197,9 @@ EXPIRY_DAYS    = 60    # days until job expires on the site
 
 WP_BATCH_SIZE  = 10
 WP_BATCH_PAUSE = 2.0
+WP_TIMEOUT     = 60   # seconds per WP write
+WP_FAIL_PAUSE  = 60   # back off after WP times out / refuses the connection
+WP_MAX_FAILS   = 3    # consecutive WP failures before stopping the import
 
 ICON_HORSE_CDN = "https://icon.horse/icon/{domain}"
 BRANDFETCH_CDN = "https://cdn.brandfetch.io/domain/{domain}"
@@ -706,14 +709,30 @@ def _norm_key(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s
 
-def _loc_key(s: str) -> str:
-    """Location for dedup: the remote-only pass stores "Remote, United States" while the
-    standard pass stores "Remote, Remote, United States" for the same job."""
-    return re.sub(r"\bremote( remote)+\b", "remote", _norm_key(s))
+def job_key(job: dict) -> tuple[str, str]:
+    """(company, title) identity — Lensa re-issues a new URL/ID for the same job daily,
+    and the same job posted in several cities collapses into one post."""
+    return (_norm_key(job["company"]), _norm_key(job["title"]))
 
-def job_key(job: dict) -> tuple[str, str, str]:
-    """(company, title, location) identity — Lensa re-issues a new URL/ID for the same job daily."""
-    return (_norm_key(job["company"]), _norm_key(job["title"]), _loc_key(job_loc_str(job)))
+_wp_fails = 0  # consecutive WP timeouts / connection errors
+
+def wp_write(url: str, payload: dict) -> requests.Response | None:
+    """POST to WP. On timeout/connection error: back off and return None.
+    No immediate retry: a timed-out create may still have gone through on the
+    server, and the next run's URL/identity dedup picks up whatever didn't."""
+    global _wp_fails
+    try:
+        resp = wp.post(url, json=payload, timeout=WP_TIMEOUT)
+    except (requests.Timeout, requests.ConnectionError) as e:
+        _wp_fails += 1
+        print(f"    [wp] {type(e).__name__} ({_wp_fails}/{WP_MAX_FAILS}) — pausing {WP_FAIL_PAUSE}s")
+        time.sleep(WP_FAIL_PAUSE)
+        return None
+    _wp_fails = 0
+    return resp
+
+def wp_down() -> bool:
+    return _wp_fails >= WP_MAX_FAILS
 
 def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None:
     title        = job["title"]
@@ -769,7 +788,9 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
     if dry_run:
         return {"dry_run": True}
 
-    resp = wp.post(f"{WP_API}/job-listings", json=payload, timeout=30)
+    resp = wp_write(f"{WP_API}/job-listings", payload)
+    if resp is None:
+        return None
     if resp.status_code in (200, 201):
         return resp.json()
     print(f"    [wp] Create failed ({resp.status_code}): {resp.text[:300]}")
@@ -779,7 +800,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 # STARTUP — pre-load existing application URLs from WP
 # =============================================================================
 
-def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
     print("Loading existing application URLs from WordPress...")
     urls: set[str] = set()
     try:
@@ -790,14 +811,14 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         print(f"  ERROR: could not load existing jobs: {e}")
         sys.exit(1)
 
-    keys: set[tuple[str, str, str]] = set()
+    keys: set[tuple[str, str]] = set()
     for row in rows:
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
         company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
         if company and title:
-            keys.add((company, title, _loc_key(row.get("location") or "")))
+            keys.add((company, title))
 
     print(f"\n  Done. {len(urls)} existing application URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -866,6 +887,8 @@ def main() -> None:
     if start:
         print(f"  Resuming at keyword {start + 1}/{len(keyword_list)}")
     for n, job_title in enumerate(keyword_list[start:] + keyword_list[:start]):
+        if wp_down():
+            break
         print(f"\n[Keyword] {job_title}")
         if not args.dry_run:
             state["next_keyword"] = (start + n) % len(keyword_list)
@@ -876,6 +899,8 @@ def main() -> None:
             raw_jobs = fetch_all_lensa(job_title, remote_only)
 
             for raw in raw_jobs:
+                if wp_down():
+                    break
                 job = parse_lensa_job(raw, remote_only)
 
                 unique_id = job["unique_id"]
@@ -969,7 +994,7 @@ def main() -> None:
         time.sleep(0.5)  # pause between keywords
 
     # Final state save (catches any remaining changes from dry-run skips etc.)
-    if not args.dry_run:
+    if not args.dry_run and not wp_down():
         state["next_keyword"] = 0  # full pass completed
         state["imported_ids"] = list(imported_ids)
         state["last_run"]     = datetime.now().isoformat()
@@ -980,6 +1005,10 @@ def main() -> None:
     print(f"  Imported: {new_count}")
     print(f"  Skipped:  {skip_count}  (already imported, off-topic, or blocklisted)")
     print(f"  Errors:   {error_count}")
+
+    if wp_down():
+        print(f"ERROR: WordPress failed to respond {WP_MAX_FAILS} times in a row — import stopped early.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

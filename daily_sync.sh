@@ -4,7 +4,8 @@
 # Runs each morning to import new jobs posted in the past 1 day.
 # Logs to ~/Library/Logs/revopscareers_sync.log (rotated weekly by macOS)
 #
-# Phase 1: All 4 import scripts run in parallel to cut wall-clock time.
+# Phase 1: The 4 import scripts run in two parallel pairs (Hirebase + WhatJobs SG,
+#          then WhatJobs US + Lensa) so at most 2 write to WordPress at once.
 #          Each writes to a temp log; output is printed in order after all finish.
 # Phase 2: Cleanup steps run sequentially (require imports to be done).
 # =============================================================================
@@ -12,7 +13,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_FILE="${SYNC_LOG_FILE:-$HOME/Library/Logs/revopscareers_sync.log}"
 MODE="${1:-full}"   # full = imports + cleanup, imports = Phase 1 only
-IMPORT_TIMEOUT_MIN=240   # per import script; runs are 6h apart on the server
+IMPORT_TIMEOUT_MIN=170   # per import script; two pairs back to back stay under the 6h between server runs
 mkdir -p "$(dirname "$LOG_FILE")"
 PYTHON="$(which python3)"
 WP_PATH="${WP_PATH:-$HOME/revopscareers.com/public}"
@@ -41,32 +42,32 @@ cd "$SCRIPT_DIR"
 log "===== Daily sync started (mode: $MODE) ====="
 
 # =============================================================================
-# Phase 1 — Parallel imports
+# Phase 1 — Imports in two parallel pairs
 # Each script has its own state file (no conflicts) and its own timeout.
 # State is saved per page, so a timeout loses at most one page of imports.
 # =============================================================================
-log "Phase 1 — Starting parallel imports (timeout ${IMPORT_TIMEOUT_MIN}m each)..."
+log "Phase 1 — Starting imports in two pairs (timeout ${IMPORT_TIMEOUT_MIN}m each)..."
 
 timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_hirebase_jobs.py --since 3 --max-new 1200 \
     > "$SYNC_TMPDIR/hirebase.log" 2>&1 &
 PID_HB=$!
 
-timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 \
-    > "$SYNC_TMPDIR/whatjobs_us.log" 2>&1 &
-PID_WJ_US=$!
-
 timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_whatjobs_jobs.py --region sg --max-age 5 \
     > "$SYNC_TMPDIR/whatjobs_sg.log" 2>&1 &
 PID_WJ_SG=$!
+
+wait $PID_HB;    EXIT_HB=$?
+wait $PID_WJ_SG; EXIT_WJ_SG=$?
+
+timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_whatjobs_jobs.py --region us --max-age 5 \
+    > "$SYNC_TMPDIR/whatjobs_us.log" 2>&1 &
+PID_WJ_US=$!
 
 timeout ${IMPORT_TIMEOUT_MIN}m "$PYTHON" -u sync_lensa_jobs.py \
     > "$SYNC_TMPDIR/lensa.log" 2>&1 &
 PID_LENSA=$!
 
-# Wait for all four and collect exit codes
-wait $PID_HB;    EXIT_HB=$?
 wait $PID_WJ_US; EXIT_WJ_US=$?
-wait $PID_WJ_SG; EXIT_WJ_SG=$?
 wait $PID_LENSA; EXIT_LENSA=$?
 
 # Print logs in order (stdout + append to log file)
