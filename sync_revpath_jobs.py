@@ -202,7 +202,9 @@ def build_job(item: dict, posting: dict, app_url: str) -> dict:
 
     addr  = ((posting.get("jobLocation") or {}).get("address") or {})
     parts = [addr.get("addressLocality"), addr.get("addressRegion"), addr.get("addressCountry")]
-    location = ", ".join(p for p in parts if p) or re.sub(r"^Remote\s*\((.*)\)$", r"\1", item["location"])
+    # Some pages give region "United States" + country "US" — normalize and drop repeats
+    parts = [{"US": "United States", "USA": "United States"}.get(p, p) for p in parts if p]
+    location = ", ".join(dict.fromkeys(parts)) or re.sub(r"^Remote\s*\((.*)\)$", r"\1", item["location"])
 
     loc_hint  = f"{item['location']} {title}".lower()
     is_remote = posting.get("jobLocationType") == "TELECOMMUTE" or "remote" in loc_hint
