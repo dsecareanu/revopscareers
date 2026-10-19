@@ -70,6 +70,10 @@ PID_LENSA=$!
 wait $PID_WJ_US; EXIT_WJ_US=$?
 wait $PID_LENSA; EXIT_LENSA=$?
 
+# RevPath RSS is small (~2 min) — runs on its own after the pairs
+timeout 20m "$PYTHON" -u sync_revpath_jobs.py > "$SYNC_TMPDIR/revpath.log" 2>&1
+EXIT_RP=$?
+
 # Print logs in order (stdout + append to log file)
 log "--- Hirebase output ---"
 cat "$SYNC_TMPDIR/hirebase.log" | tee -a "$LOG_FILE"
@@ -90,6 +94,11 @@ log "--- Lensa output ---"
 cat "$SYNC_TMPDIR/lensa.log" | tee -a "$LOG_FILE"
 if   [ $EXIT_LENSA -eq 124 ]; then log "WARNING: Lensa timed out after ${IMPORT_TIMEOUT_MIN} min"
 elif [ $EXIT_LENSA -ne 0 ];   then log "ERROR: Lensa exited with code $EXIT_LENSA"; fi
+
+log "--- RevPath output ---"
+cat "$SYNC_TMPDIR/revpath.log" | tee -a "$LOG_FILE"
+if   [ $EXIT_RP -eq 124 ]; then log "WARNING: RevPath timed out after 20 min"
+elif [ $EXIT_RP -ne 0 ];   then log "ERROR: RevPath exited with code $EXIT_RP"; fi
 
 log "Phase 1 complete."
 
@@ -126,6 +135,6 @@ log "===== Daily sync complete ====="
 
 # Fail the run (triggers the failure alert) if any import errored out.
 # Timeouts (124) stay warnings, matching the other steps.
-for code in $EXIT_HB $EXIT_WJ_US $EXIT_WJ_SG $EXIT_LENSA; do
+for code in $EXIT_HB $EXIT_WJ_US $EXIT_WJ_SG $EXIT_LENSA $EXIT_RP; do
     if [ $code -ne 0 ] && [ $code -ne 124 ]; then exit 1; fi
 done
