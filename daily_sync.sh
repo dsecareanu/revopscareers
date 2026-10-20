@@ -135,11 +135,28 @@ log "===== Daily sync complete ====="
 
 # Fail the run (triggers the failure alert) if any import errored out.
 # Timeouts (124) stay warnings, matching the other steps.
-# WhatJobs is a flaky third-party API: its failures only warn while the other sources succeed.
+# WhatJobs is a flaky third-party API: its failures only warn, unless every run has
+# failed for 2+ days. The first failure time is kept in WJ_FAIL_FILE until a run succeeds.
+WJ_FAIL_FILE="$SCRIPT_DIR/.whatjobs_failing_since"
+WJ_FAILED=0
+for code in $EXIT_WJ_US $EXIT_WJ_SG; do
+    if [ $code -ne 0 ] && [ $code -ne 124 ]; then WJ_FAILED=1; fi
+done
+WJ_ALERT=0
+if [ $WJ_FAILED -eq 1 ]; then
+    [ -f "$WJ_FAIL_FILE" ] || date +%s > "$WJ_FAIL_FILE"
+    WJ_SINCE=$(cat "$WJ_FAIL_FILE")
+    if [ $(( $(date +%s) - WJ_SINCE )) -ge $(( 2 * 86400 )) ]; then
+        log "ERROR: WhatJobs has failed on every run since $(date -u -d @$WJ_SINCE '+%F %T') UTC (2+ days)."
+        WJ_ALERT=1
+    else
+        log "WARNING: WhatJobs failed (failing since $(date -u -d @$WJ_SINCE '+%F %T') UTC) — not alerting yet."
+    fi
+else
+    rm -f "$WJ_FAIL_FILE"
+fi
+
 for code in $EXIT_HB $EXIT_LENSA $EXIT_RP; do
     if [ $code -ne 0 ] && [ $code -ne 124 ]; then exit 1; fi
 done
-for code in $EXIT_WJ_US $EXIT_WJ_SG; do
-    if [ $code -ne 0 ] && [ $code -ne 124 ]; then log "WARNING: WhatJobs failed but other sources succeeded — not alerting."; break; fi
-done
-exit 0
+exit $WJ_ALERT
