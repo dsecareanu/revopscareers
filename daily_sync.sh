@@ -83,12 +83,12 @@ elif [ $EXIT_HB -ne 0 ];   then log "ERROR: Hirebase exited with code $EXIT_HB";
 log "--- WhatJobs US output ---"
 cat "$SYNC_TMPDIR/whatjobs_us.log" | tee -a "$LOG_FILE"
 if   [ $EXIT_WJ_US -eq 124 ]; then log "WARNING: WhatJobs US timed out after ${IMPORT_TIMEOUT_MIN} min"
-elif [ $EXIT_WJ_US -ne 0 ];   then log "ERROR: WhatJobs US exited with code $EXIT_WJ_US"; fi
+elif [ $EXIT_WJ_US -ne 0 ];   then log "WARNING: WhatJobs US exited with code $EXIT_WJ_US"; fi
 
 log "--- WhatJobs SG output ---"
 cat "$SYNC_TMPDIR/whatjobs_sg.log" | tee -a "$LOG_FILE"
 if   [ $EXIT_WJ_SG -eq 124 ]; then log "WARNING: WhatJobs SG timed out after ${IMPORT_TIMEOUT_MIN} min"
-elif [ $EXIT_WJ_SG -ne 0 ];   then log "ERROR: WhatJobs SG exited with code $EXIT_WJ_SG"; fi
+elif [ $EXIT_WJ_SG -ne 0 ];   then log "WARNING: WhatJobs SG exited with code $EXIT_WJ_SG"; fi
 
 log "--- Lensa output ---"
 cat "$SYNC_TMPDIR/lensa.log" | tee -a "$LOG_FILE"
@@ -135,6 +135,11 @@ log "===== Daily sync complete ====="
 
 # Fail the run (triggers the failure alert) if any import errored out.
 # Timeouts (124) stay warnings, matching the other steps.
-for code in $EXIT_HB $EXIT_WJ_US $EXIT_WJ_SG $EXIT_LENSA $EXIT_RP; do
+# WhatJobs is a flaky third-party API: its failures only warn while the other sources succeed.
+for code in $EXIT_HB $EXIT_LENSA $EXIT_RP; do
     if [ $code -ne 0 ] && [ $code -ne 124 ]; then exit 1; fi
 done
+for code in $EXIT_WJ_US $EXIT_WJ_SG; do
+    if [ $code -ne 0 ] && [ $code -ne 124 ]; then log "WARNING: WhatJobs failed but other sources succeeded — not alerting."; break; fi
+done
+exit 0
