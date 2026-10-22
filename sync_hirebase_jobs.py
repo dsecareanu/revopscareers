@@ -969,7 +969,9 @@ def fetch_hirebase_page(cluster_name: str, cluster_titles: list[str],
         "sort_order": "desc",
     }
     if date_after:
-        lexical["date_posted_after"] = date_after
+        # Hirebase has no date_posted_after field (silently ignored); days_ago is the supported filter
+        days = (datetime.now().date() - datetime.strptime(date_after, "%Y-%m-%d").date()).days
+        lexical["days_ago"] = max(1, days)
     payload = {
         "vector": {"query": cluster_name},
         "lexical": lexical,
