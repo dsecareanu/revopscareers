@@ -236,6 +236,7 @@ TITLE_BLOCKLIST = [
 COMPANY_BLOCKLIST = [
     "salmonjobs",
     "ismira recruitment",
+    "socket.dev",             # WhatJobs labels other employers' ads "Socket.dev" (real Socket jobs come via Lensa)
     # Staffing agencies placing non-tech roles
     "cross border talents",   # 300+ spam placements (Barcelona relocation jobs etc.)
     "peoplelink staffing",
