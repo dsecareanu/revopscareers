@@ -87,8 +87,8 @@ function roc_role_read_html( $read ) {
     if ( ! empty( $read['checks'][0] ) ) $extra .= ' Worth checking: ' . $e( rtrim( $read['checks'][0]['note'], '. ' ) ) . '.';
     if ( ! empty( $read['questions'][0] ) ) $extra .= ' Ask: ' . $e( $read['questions'][0] );
 
-    $h  = '<section class="roc-role-read" aria-label="Role read">';
-    $h .= '<h3>Role read</h3>';
+    $h  = '<section class="roc-role-read" aria-label="ReLoop.me role read">';
+    $h .= '<h3><a href="https://www.reloop.me/?utm_source=revopscareers&amp;utm_medium=job_page&amp;utm_campaign=role_read" target="_blank" rel="noopener">ReLoop.me</a> role read</h3>';
     $h .= '<p>' . $e( $read['summary'] ) . '</p>';
     $h .= '<p>' . $level . ' ' . $facts . '</p>';
     if ( $musts || $extra ) $h .= '<p>' . ( $musts ? 'Must-haves: ' . $musts . '.' : '' ) . $extra . '</p>';
