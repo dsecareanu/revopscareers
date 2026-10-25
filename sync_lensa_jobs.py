@@ -48,6 +48,7 @@ from pathlib import Path
 
 import requests
 
+import job_identity
 from tagging import assign_tags, fetch_tag_ids
 
 # =============================================================================
@@ -709,10 +710,10 @@ def _norm_key(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s
 
-def job_key(job: dict) -> tuple[str, str]:
-    """(company, title) identity — Lensa re-issues a new URL/ID for the same job daily,
-    and the same job posted in several cities collapses into one post."""
-    return (_norm_key(job["company"]), _norm_key(job["title"]))
+def job_key(job: dict) -> tuple[str, str, str]:
+    """(company, title, country) identity — Lensa re-issues a new URL/ID for the same job daily,
+    and the same job posted in several cities of one country collapses into one post."""
+    return (_norm_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(job_loc_str(job)))
 
 _wp_fails = 0  # consecutive WP timeouts / connection errors
 
@@ -800,7 +801,7 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 # STARTUP — pre-load existing application URLs from WP
 # =============================================================================
 
-def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
     print("Loading existing application URLs from WordPress...")
     urls: set[str] = set()
     try:
@@ -811,14 +812,14 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
         print(f"  ERROR: could not load existing jobs: {e}")
         sys.exit(1)
 
-    keys: set[tuple[str, str]] = set()
+    keys: set[tuple[str, str, str]] = set()
     for row in rows:
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
         company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
         if company and title:
-            keys.add((company, title))
+            keys.add((company, title, job_identity.country_of(row.get("location") or "")))
 
     print(f"\n  Done. {len(urls)} existing application URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -927,6 +928,9 @@ def main() -> None:
                     skip_count += 1
                     continue
                 if any(t in company_lower for t in COMPANY_INDUSTRY_BLOCKLIST):
+                    skip_count += 1
+                    continue
+                if job_identity.is_aggregator(company):
                     skip_count += 1
                     continue
 

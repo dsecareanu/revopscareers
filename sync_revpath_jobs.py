@@ -36,6 +36,7 @@ from pathlib import Path
 
 import requests
 
+import job_identity
 from tagging import assign_tags, fetch_tag_ids
 
 # =============================================================================
@@ -371,9 +372,11 @@ def _norm_key(s: str) -> str:
     s = re.sub(r"[^\w\s]", "", s.lower().strip())
     return re.sub(r"\s+", " ", s)
 
-def job_key(job: dict) -> tuple[str, str]:
-    """(company, title) identity — the same job posted in several cities collapses into one post."""
-    return (_norm_key(job["company"]), _norm_key(job["title"]))
+def job_key(job: dict) -> tuple[str, str, str]:
+    """(company, title, country) identity — the same job posted in several cities of one
+    country collapses into one post."""
+    location = job["location"] or ("Remote" if job["is_remote"] else "")
+    return (_norm_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(location))
 
 _wp_fails = 0  # consecutive WP timeouts / connection errors
 
@@ -431,7 +434,7 @@ def create_wp_job(job: dict, category_ids: list[int], media_id: int, dry_run: bo
     print(f"    [wp] Create failed ({resp.status_code}): {resp.text[:300]}")
     return None
 
-def load_existing_dedup_keys() -> tuple[set[str], set[tuple[str, str]]]:
+def load_existing_dedup_keys() -> tuple[set[str], set[tuple[str, str, str]]]:
     print("Loading existing application URLs from WordPress...")
     try:
         r = wp.get(f"{API_BASE}/roc/v1/job-dedup-keys", timeout=120)
@@ -441,14 +444,14 @@ def load_existing_dedup_keys() -> tuple[set[str], set[tuple[str, str]]]:
         print(f"  ERROR: could not load existing jobs: {e}")
         sys.exit(1)
     urls: set[str] = set()
-    keys: set[tuple[str, str]] = set()
+    keys: set[tuple[str, str, str]] = set()
     for row in rows:
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
         company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
         if company and title:
-            keys.add((company, title))
+            keys.add((company, title, job_identity.country_of(row.get("location") or "")))
     print(f"  {len(urls)} existing application URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
 
@@ -509,6 +512,10 @@ def main() -> None:
             error_count += 1
             continue
         if job["url"] in existing_urls or job_key(job) in existing_keys:
+            skip_count += 1
+            imported_ids.add(job["guid"])
+            continue
+        if job_identity.is_aggregator(job["company"]):
             skip_count += 1
             imported_ids.add(job["guid"])
             continue

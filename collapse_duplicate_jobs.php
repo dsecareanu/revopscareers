@@ -1,7 +1,8 @@
 <?php
 /**
- * Collapse published job_listing posts that share the same company + title
- * (the same job posted in several cities) into one post.
+ * Collapse published job_listing posts that share the same company + title + country
+ * (the same job posted in several cities of one country) into one post. The country
+ * comes from roc_extract_country() in the child theme, like the sync scripts' job_identity.py.
  *
  * Keeps the newest post of each group (latest expiry, freshest apply link) — or
  * the client post if the group has one — 301-redirects the others to it via the
@@ -25,9 +26,10 @@ function collapse_key($s) {
 
 global $wpdb;
 $rows = $wpdb->get_results("
-    SELECT p.ID, p.post_title, p.post_author, p.post_date_gmt, m.meta_value AS company
+    SELECT p.ID, p.post_title, p.post_author, p.post_date_gmt, m.meta_value AS company, l.meta_value AS location
     FROM {$wpdb->posts} p
     JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_company_name'
+    LEFT JOIN {$wpdb->postmeta} l ON l.post_id = p.ID AND l.meta_key = '_job_location'
     WHERE p.post_type = 'job_listing' AND p.post_status = 'publish'
 ");
 
@@ -36,7 +38,8 @@ foreach ($rows as $r) {
     $c = collapse_key($r->company);
     $t = collapse_key($r->post_title);
     if ($c === '' || $t === '') continue;
-    $groups["$c|$t"][] = $r;
+    $country = (string) roc_extract_country((string) $r->location);
+    $groups["$c|$t|$country"][] = $r;
 }
 
 $plan = [];   // [keep_row, [dupe_rows]]

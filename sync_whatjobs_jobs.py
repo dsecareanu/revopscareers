@@ -62,6 +62,7 @@ from pathlib import Path
 
 import requests
 
+import job_identity
 from tagging import assign_tags, fetch_tag_ids
 
 # =============================================================================
@@ -879,19 +880,19 @@ def _norm_key(s: str) -> str:
     return s
 
 
-def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
+def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]]]:
     """
     Fetch all existing job_listing posts and collect:
       - existing_urls: set of _application URL strings
-      - existing_keys: set of (company, title) tuples for dedup by identity
-        (same job posted in several cities collapses into one post)
+      - existing_keys: set of (company, title, country) tuples for dedup by identity
+        (same job posted in several cities of one country collapses into one post)
 
     Both are used to skip already-imported jobs without relying on the local state
     file alone. existing_keys catches re-posts of the same job with a new URL.
     """
     print("Loading existing jobs from WordPress...")
     urls: set[str] = set()
-    keys: set[tuple[str, str]] = set()
+    keys: set[tuple[str, str, str]] = set()
     try:
         r = wp.get(f"{SITE_URL}/wp-json/roc/v1/job-dedup-keys", timeout=120)
         r.raise_for_status()
@@ -907,8 +908,9 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
         company  = _norm_key(row.get("company") or "")
         location = _norm_key(row.get("location") or "")
         title    = _norm_key(row.get("title") or "")
+        country  = job_identity.country_of(row.get("location") or "")
         if company and title:
-            keys.add((company, title))  # stored title (reliable for prefixed slugs)
+            keys.add((company, title, country))  # stored title (reliable for prefixed slugs)
         slug = row.get("slug") or ""
         if company and slug:
             slug_norm = slug.replace("-", " ")
@@ -920,7 +922,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str]]]:
                 if slug_norm.endswith(loc_slug):
                     slug_norm = slug_norm[: -len(loc_slug)].strip()
             if slug_norm:
-                keys.add((company, slug_norm))
+                keys.add((company, slug_norm, country))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -1104,7 +1106,8 @@ def main() -> None:
                     skip_count += 1
                     continue
 
-                job_key = (_norm_key(company), _norm_key(title))
+                job_key = (_norm_key(company), _norm_key(title),
+                           job_identity.country_of(_build_loc_str(job["location"])))
                 if job_key in existing_keys:
                     skip_count += 1
                     continue
@@ -1129,6 +1132,9 @@ def main() -> None:
                     if not any(s in title_lower for s in SENIOR_TITLE_KEYWORDS):
                         skip_count += 1
                         continue
+                if job_identity.is_aggregator(company):
+                    skip_count += 1
+                    continue
 
                 category_ids = assign_categories(title)
                 if not category_ids:
