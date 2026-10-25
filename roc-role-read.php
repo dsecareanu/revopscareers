@@ -55,6 +55,29 @@ add_action( 'rest_api_init', function () {
     ] );
 } );
 
+/**
+ * Salary field value ("138000.0") as display text: currency from _job_salary_currency, else from the
+ * job's country, else $; whole number; period from _job_salary_unit, or "a year" for amounts >= 20,000.
+ */
+function roc_role_read_salary_text( $post_id, $raw ) {
+    $amount = (float) str_replace( ',', '', $raw );
+    if ( $amount <= 0 ) return '';
+    $code = strtoupper( (string) get_post_meta( $post_id, '_job_salary_currency', true ) );
+    if ( ! $code ) {
+        $by_country = [ 'United States' => 'USD', 'Canada' => 'CAD', 'United Kingdom' => 'GBP', 'Singapore' => 'SGD',
+            'Australia' => 'AUD', 'New Zealand' => 'NZD', 'India' => 'INR', 'Switzerland' => 'CHF', 'Japan' => 'JPY',
+            'Germany' => 'EUR', 'France' => 'EUR', 'Spain' => 'EUR', 'Italy' => 'EUR', 'Netherlands' => 'EUR', 'Ireland' => 'EUR',
+            'Belgium' => 'EUR', 'Austria' => 'EUR', 'Portugal' => 'EUR', 'Finland' => 'EUR', 'Poland' => 'PLN', 'Sweden' => 'SEK' ];
+        $code = $by_country[ (string) roc_extract_country( (string) get_post_meta( $post_id, '_job_location', true ) ) ] ?? 'USD';
+    }
+    $symbols = [ 'USD' => '$', 'EUR' => '€', 'GBP' => '£', 'SGD' => 'S$', 'CAD' => 'C$', 'AUD' => 'A$', 'NZD' => 'NZ$', 'INR' => '₹', 'JPY' => '¥' ];
+    $money   = isset( $symbols[ $code ] ) ? $symbols[ $code ] . number_format( $amount ) : $code . ' ' . number_format( $amount );
+    $unit    = strtoupper( (string) get_post_meta( $post_id, '_job_salary_unit', true ) );
+    $period  = [ 'YEAR' => 'a year', 'MONTH' => 'a month', 'WEEK' => 'a week', 'DAY' => 'a day', 'HOUR' => 'an hour' ][ $unit ]
+        ?? ( $amount >= 20000 ? 'a year' : '' );
+    return trim( $money . ' ' . $period );
+}
+
 function roc_role_read_html( $read ) {
     $e     = 'esc_html';
     $money = function ( $n ) { return '$' . number_format( $n / 1000 ) . 'k'; };
@@ -73,7 +96,8 @@ function roc_role_read_html( $read ) {
     if ( ! empty( $pay['midpoint'] ) ) {
         $facts = 'Pay ' . $e( $pay['text'] ) . ' (median for US ' . $e( $read['level'] ) . ' ads here in 2026: ' . $money( $pay['typical_midpoint'] ) . ').';
     } elseif ( ! empty( $pay['stated'] ) ) {
-        $facts = 'Pay is stated' . ( $pay['text'] ? ': ' . $e( $pay['text'] ) : '' ) . '.';
+        $text  = preg_match( '/^\s*[\d.,]+\s*$/', (string) $pay['text'] ) ? roc_role_read_salary_text( get_the_ID(), $pay['text'] ) : (string) $pay['text'];
+        $facts = 'Pay is stated' . ( $text ? ': ' . $e( $text ) : '' ) . '.';
     } else {
         $facts = 'Pay is not stated.';
     }
