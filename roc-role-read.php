@@ -56,80 +56,48 @@ add_action( 'rest_api_init', function () {
 } );
 
 function roc_role_read_html( $read ) {
-    $e    = 'esc_html';
-    $list = function ( $items, $quoted = true ) use ( $e ) {
-        $out = '';
-        foreach ( $items as $i ) {
-            $out .= $quoted
-                ? '<li>' . $e( $i['item'] ) . ' <span class="roc-rr-quote">&ldquo;' . $e( $i['quote'] ) . '&rdquo;</span></li>'
-                : '<li>' . $e( $i ) . '</li>';
-        }
-        return $out ? '<ul>' . $out . '</ul>' : '';
+    $e     = 'esc_html';
+    $money = function ( $n ) { return '$' . number_format( $n / 1000 ) . 'k'; };
+    $join  = function ( $items ) {   // "a, b and c"
+        $items = array_values( array_filter( $items ) );
+        return count( $items ) > 1 ? implode( ', ', array_slice( $items, 0, -1 ) ) . ' and ' . end( $items ) : ( $items[0] ?? '' );
     };
-    $axes = [
-        'hands-on vs strategic'     => [ 'Hands-on', 'Strategic' ],
-        'maintain vs build'         => [ 'Maintain', 'Build' ],
-        'specialist vs generalist'  => [ 'Specialist', 'Generalist' ],
-        'clear vs open-ended scope' => [ 'Clear scope', 'Open-ended scope' ],
-    ];
-    $manages = [ 'yes' => 'Yes', 'no' => 'No', 'not stated' => 'Not stated' ][ $read['manages_people'] ] ?? 'Not stated';
-    $rl      = 'https://www.reloop.me/role-intel?utm_source=revopscareers&utm_medium=job_page&utm_campaign=role_read';
-    $money   = function ( $n ) { return '$' . number_format( $n / 1000 ) . 'k'; };
+    $rl = 'https://www.reloop.me/role-intel?utm_source=revopscareers&utm_medium=job_page&utm_campaign=role_read';
+
+    $people = [ 'yes' => 'manages people', 'no' => 'no people management', 'not stated' => 'no team stated' ][ $read['manages_people'] ] ?? '';
+    $title  = [ 'matches' => 'the title matches the work', 'title overstates the work' => 'the title overstates the work',
+                'title understates the work' => 'the title understates the work', 'unclear' => 'the title is hard to judge from the ad' ][ $read['title_match'] ] ?? '';
+    $level  = 'Reads as a <strong>' . $e( $read['level'] ) . '</strong> role (' . $e( $people ) . '); ' . $e( $title ) . '. ' . $e( $read['level_reason'] );
 
     $pay = $read['pay'] ?? [];
     if ( ! empty( $pay['midpoint'] ) ) {
-        $pay_line = 'Stated: ' . $e( $pay['text'] ) . '. The median for US ' . $e( $read['level'] )
-            . ' ads on RevOps Careers in 2026 is ' . $money( $pay['typical_midpoint'] ) . '.';
+        $facts = 'Pay ' . $e( $pay['text'] ) . ' (median for US ' . $e( $read['level'] ) . ' ads here in 2026: ' . $money( $pay['typical_midpoint'] ) . ').';
     } elseif ( ! empty( $pay['stated'] ) ) {
-        $pay_line = 'Stated' . ( $pay['text'] ? ': ' . $e( $pay['text'] ) : '' ) . '.';
+        $facts = 'Pay is stated' . ( $pay['text'] ? ': ' . $e( $pay['text'] ) : '' ) . '.';
     } else {
-        $pay_line = 'Not stated in the ad.';
+        $facts = 'Pay is not stated.';
     }
-    $years      = $read['years'] ?? [];
-    $years_line = ! empty( $years['asked'] )
-        ? 'Asks for ' . (int) $years['asked'] . '+ years; typical for this level on RevOps Careers: ' . (int) $years['typical'] . '.'
-        : 'Not stated in the ad.';
+    $years = $read['years'] ?? [];
+    if ( ! empty( $years['asked'] ) ) {
+        $facts .= ' Asks for ' . (int) $years['asked'] . '+ years (typical for this level: ' . (int) $years['typical'] . ').';
+    }
+
+    $musts = $join( array_map( function ( $i ) use ( $e ) { return $e( lcfirst( rtrim( $i['item'], '. ' ) ) ); }, array_slice( $read['must_haves'], 0, 3 ) ) );
+    $extra = '';
+    if ( ! empty( $read['checks'][0] ) ) $extra .= ' Worth checking: ' . $e( rtrim( $read['checks'][0]['note'], '. ' ) ) . '.';
+    if ( ! empty( $read['questions'][0] ) ) $extra .= ' Ask: ' . $e( $read['questions'][0] );
 
     $h  = '<section class="roc-role-read" aria-label="Role read">';
     $h .= '<h3>Role read</h3>';
-    $h .= '<p class="roc-rr-sub">AI-generated read of this job ad by RevOps Careers, using Claude, based on '
-        . '<a href="https://www.reloop.me/charter" target="_blank" rel="noopener">ReLoop.me&rsquo;s Fair Read method</a>. '
-        . 'Indicative, not career advice.</p>';
-    $h .= '<p><strong>In plain words:</strong> ' . $e( $read['summary'] ) . '</p>';
-    $h .= '<p class="roc-rr-facts"><span>Level: <strong>' . $e( $read['level'] ) . '</strong></span>'
-        . '<span>Manages people: <strong>' . $manages . '</strong></span>'
-        . '<span>Title: <strong>' . $e( ucfirst( $read['title_match'] ) ) . '</strong></span></p>';
-    $h .= '<p class="roc-rr-why">' . $e( $read['level_reason'] ) . '</p>';
-    $h .= '<p><strong>Pay:</strong> ' . $pay_line . ' <strong>Experience:</strong> ' . $years_line . '</p>';
-    if ( $read['must_haves'] )    $h .= '<h4>Must-haves</h4>' . $list( $read['must_haves'] );
-    if ( $read['nice_to_haves'] ) $h .= '<h4>Nice to have</h4>' . $list( $read['nice_to_haves'] );
-    if ( $read['checks'] ) {
-        $h .= '<h4>Worth checking before you apply</h4><ul>';
-        foreach ( $read['checks'] as $c ) {
-            $h .= '<li><strong>' . $e( ucfirst( $c['flag'] ) ) . ':</strong> ' . $e( $c['note'] )
-                . ' <span class="roc-rr-quote">&ldquo;' . $e( $c['quote'] ) . '&rdquo;</span></li>';
-        }
-        $h .= '</ul>';
-    }
-    $h .= '<details><summary>How the job leans, AI in the role, and questions to ask</summary>';
-    if ( $read['leans'] ) {
-        $h .= '<h4>How the job leans</h4><ul>';
-        foreach ( $read['leans'] as $l ) {
-            [ $a, $b ] = $axes[ $l['axis'] ] ?? [ '', '' ];
-            $lean = [ 'mostly the first' => "Mostly $a", 'balanced' => "Balanced $a / $b", 'mostly the second' => "Mostly $b" ][ $l['lean'] ] ?? '';
-            $h   .= '<li><strong>' . $e( $lean ) . ':</strong> ' . $e( $l['reason'] ) . '</li>';
-        }
-        $h .= '</ul>';
-    }
-    $h .= '<h4>AI in the role</h4><p>' . $e( ucfirst( $read['ai_in_role'] ) )
-        . ( $read['ai_quote'] ? ' <span class="roc-rr-quote">&ldquo;' . $e( $read['ai_quote'] ) . '&rdquo;</span>' : '' ) . '</p>';
-    if ( $read['apply_if'] )  $h .= '<h4>Worth applying if</h4>' . $list( $read['apply_if'], false );
-    if ( $read['questions'] ) $h .= '<h4>Questions to ask</h4>' . $list( $read['questions'], false );
-    $h .= '</details>';
+    $h .= '<p>' . $e( $read['summary'] ) . '</p>';
+    $h .= '<p>' . $level . ' ' . $facts . '</p>';
+    if ( $musts || $extra ) $h .= '<p>' . ( $musts ? 'Must-haves: ' . $musts . '.' : '' ) . $extra . '</p>';
     $h .= '<p class="roc-rr-cta"><a href="' . esc_url( $rl ) . '" target="_blank" rel="noopener">'
-        . 'Want the full read, with an estimated pay range? Get a ReLoop.me Role Intel &rarr;</a></p>';
-    $h .= '<p class="roc-rr-foot">Generated ' . $e( $read['generated_at'] ) . '. Something looks wrong? '
-        . '<a href="mailto:hello@revopscareers.com?subject=' . rawurlencode( 'Role read: ' . get_the_title() ) . '">Tell us</a>.</p>';
+        . 'Get the full read, with an estimated pay range: ReLoop.me Role Intel &rarr;</a></p>';
+    $h .= '<p class="roc-rr-sub">AI-generated by RevOps Careers using Claude, based on '
+        . '<a href="https://www.reloop.me/charter" target="_blank" rel="noopener">ReLoop.me&rsquo;s Fair Read method</a>, '
+        . $e( $read['generated_at'] ) . '. Indicative, not career advice. '
+        . '<a href="mailto:hello@revopscareers.com?subject=' . rawurlencode( 'Role read: ' . get_the_title() ) . '">Report an issue</a>.</p>';
     $h .= '</section>';
     return $h;
 }
@@ -144,11 +112,8 @@ add_filter( 'the_job_description', function ( $content ) {
 add_action( 'wp_head', function () {
     if ( ! is_singular( 'job_listing' ) ) return;
     echo '<style>
-.roc-role-read{border:1px solid #e3e6ea;border-left:4px solid #f16736;border-radius:6px;padding:20px 22px;margin:28px 0 20px;background:#fafbfc}
-.roc-role-read h3{margin:0 0 4px}.roc-role-read h4{margin:16px 0 6px;font-size:1rem}
-.roc-rr-sub,.roc-rr-foot,.roc-rr-why{font-size:.85rem;color:#5f6b7a}.roc-rr-quote{color:#5f6b7a;font-style:italic}
-.roc-rr-facts span{display:inline-block;margin:0 18px 6px 0}.roc-role-read ul{margin:0 0 8px 18px}
-.roc-role-read details{margin-top:14px}.roc-role-read summary{cursor:pointer;font-weight:600}
-.roc-rr-cta{margin:16px 0 4px;font-weight:600}
+.roc-role-read{border:1px solid #e3e6ea;border-left:4px solid #f16736;border-radius:6px;padding:18px 22px 10px;margin:28px 0 20px;background:#fafbfc}
+.roc-role-read h3{margin:0 0 8px}.roc-role-read p{margin:0 0 10px}
+.roc-rr-cta{font-weight:600}.roc-rr-sub{font-size:.8rem;color:#5f6b7a}
 </style>';
 } );

@@ -134,14 +134,14 @@ Rules:
 - Quotes must be copied word for word from the ad, 3 to 15 words, with no changes. If you can't support an item with a quote, leave it out.
 
 What to write:
-- summary: 1-2 sentences on what the person will actually spend their time on. Refer to the company as "the employer".
-- level: the level the work implies. manages_people: whether the ad says the person will manage people. title_match: compare the title with the level the work implies. level_reason: one sentence on why.
-- must_haves: up to 5 load-bearing requirements (the ad says required, must, or makes them central). nice_to_haves: up to 5 preferences (preferred, bonus, nice to have, plus).
+- summary: one sentence, at most 30 words, on what the person will actually spend their time on. Refer to the company as "the employer".
+- level: the level the work implies. manages_people: whether the ad says the person will manage people. title_match: compare the title with the level the work implies. level_reason: one sentence, at most 20 words, on why.
+- must_haves: up to 5 load-bearing requirements, each item at most 8 words (the ad says required, must, or makes them central). nice_to_haves: up to 5 preferences (preferred, bonus, nice to have, plus).
 - checks: up to 3, only when the ad clearly shows them; otherwise an empty list. "one-person function" means no team or peers are mentioned for an area the person owns end to end.
 - leans: exactly one entry per axis (4 entries), each with a one-line reason.
 - ai_in_role with ai_quote (empty string when "none stated").
 - apply_if: 2-3 concrete things a candidate should be able to show on a resume or in an interview, written as "You can show ...".
-- questions: 3 questions to ask the employer that fill the ad's most important gaps.
+- questions: 3 questions to ask the employer that fill the ad's most important gaps, each at most 15 words.
 Write in plain English, short sentences, no marketing language."""
 
 
