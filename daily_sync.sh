@@ -102,6 +102,13 @@ elif [ $EXIT_RP -ne 0 ];   then log "ERROR: RevPath exited with code $EXIT_RP"; 
 
 log "Phase 1 complete."
 
+# Every run: Role reads (Claude Haiku 5.5) for featured RevOps jobs without one (~40/day, ~$0.001 each)
+log "Role reads for featured RevOps jobs..."
+timeout 20m "$PYTHON" -u sync_role_reads.py 2>&1 | tee -a "$LOG_FILE"
+SYNC_EXIT=${PIPESTATUS[0]}
+if   [ $SYNC_EXIT -eq 124 ]; then log "WARNING: Role reads timed out after 20 min"
+elif [ $SYNC_EXIT -ne 0 ];   then log "WARNING: sync_role_reads.py exited with code $SYNC_EXIT"; fi
+
 # Every run: unfeature webadmin jobs older than 1 day (client jobs stay featured)
 log "Unfeature old jobs (>1 day)..."
 timeout 10m wp --path="$WP_PATH" eval-file unfeature_old_jobs.php 2>&1 | tee -a "$LOG_FILE"
