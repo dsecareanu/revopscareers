@@ -8,7 +8,7 @@ One ReLoop.me Quick Check per job, shown on the job page under the description
 
   1. GET  /roc/v1/role-read-queue   published category-21 jobs without a ReLoop read:
                                     featured ones, plus older ones that have a Haiku read
-  2. POST https://api.reloop.me/role-intel/v1/quick   (header x-reloop-key, 50 reads a day)
+  2. POST https://api.reloop.me/role-intel/v1/quick   (headers x-reloop-key and x-reloop-client, 50 reads a day)
   3. POST /roc/v1/reloop-read/{id}  the full response, stored as post meta _roc_reloop_read
 
 A job is read once. The run stops when ReLoop's daily limit is reached; the rest wait
@@ -99,7 +99,7 @@ def main() -> None:
     for job in queue:
         title = html.unescape(job["title"])
         try:
-            r = requests.post(RELOOP_URL, headers={"x-reloop-key": RELOOP_API_KEY}, timeout=90,
+            r = requests.post(RELOOP_URL, headers={"x-reloop-key": RELOOP_API_KEY, "x-reloop-client": "revopscareers"}, timeout=90,
                               json={"jd_text": (title + "\n" + plain(job["content"]))[:20000]})
         except requests.RequestException as e:
             print(f"  ! {title} (#{job['id']}): network error {e.__class__.__name__}")
