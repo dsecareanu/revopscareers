@@ -713,7 +713,7 @@ def _norm_key(s: str) -> str:
 def job_key(job: dict) -> tuple[str, str, str]:
     """(company, title, country) identity — Lensa re-issues a new URL/ID for the same job daily,
     and the same job posted in several cities of one country collapses into one post."""
-    return (_norm_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(job_loc_str(job)))
+    return (job_identity.company_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(job_loc_str(job)))
 
 _wp_fails = 0  # consecutive WP timeouts / connection errors
 
@@ -817,7 +817,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
-        company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
+        company, title = job_identity.company_key(row.get("company") or ""), _norm_key(row.get("title") or "")
         if company and title:
             keys.add((company, title, job_identity.country_of(row.get("location") or "")))
 

@@ -938,7 +938,8 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         title    = _norm_key(row.get("title") or "")
         country  = job_identity.country_of(row.get("location") or "")
         if company and title:
-            keys.add((company, title, country))  # stored title (reliable for prefixed slugs)
+            ckey     = job_identity.company_key(row.get("company") or "")
+            keys.add((ckey, title, country))  # stored title (reliable for prefixed slugs)
         # Derive title from slug: strip company prefix and location suffix
         slug = row.get("slug") or ""
         if company and slug:
@@ -952,7 +953,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
                 if slug_norm.endswith(loc_slug):
                     slug_norm = slug_norm[: -len(loc_slug)].strip()
             if company and slug_norm:
-                keys.add((company, slug_norm, country))
+                keys.add((job_identity.company_key(row.get("company") or ""), slug_norm, country))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -1124,8 +1125,8 @@ def main() -> None:
                 app_url = job.get("application_link", "")
 
                 country    = job_identity.country_of(build_location(job))
-                job_key    = (_norm_key(company), _norm_key(title), country)
-                stored_key = (_norm_key(company), _norm_key(normalize_title(title)), country)
+                job_key    = (job_identity.company_key(company), _norm_key(title), country)
+                stored_key = (job_identity.company_key(company), _norm_key(normalize_title(title)), country)
 
                 if (hb_id in imported_ids or app_url in existing_urls
                         or job_key in existing_keys or stored_key in existing_keys):

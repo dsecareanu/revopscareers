@@ -376,7 +376,7 @@ def job_key(job: dict) -> tuple[str, str, str]:
     """(company, title, country) identity — the same job posted in several cities of one
     country collapses into one post."""
     location = job["location"] or ("Remote" if job["is_remote"] else "")
-    return (_norm_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(location))
+    return (job_identity.company_key(job["company"]), _norm_key(job["title"]), job_identity.country_of(location))
 
 _wp_fails = 0  # consecutive WP timeouts / connection errors
 
@@ -449,7 +449,7 @@ def load_existing_dedup_keys() -> tuple[set[str], set[tuple[str, str, str]]]:
         app = row.get("application") or ""
         if app:
             urls.add(str(app).strip())
-        company, title = _norm_key(row.get("company") or ""), _norm_key(row.get("title") or "")
+        company, title = job_identity.company_key(row.get("company") or ""), _norm_key(row.get("title") or "")
         if company and title:
             keys.add((company, title, job_identity.country_of(row.get("location") or "")))
     print(f"  {len(urls)} existing application URLs + {len(keys)} identity keys loaded.\n")

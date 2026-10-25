@@ -910,7 +910,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
         title    = _norm_key(row.get("title") or "")
         country  = job_identity.country_of(row.get("location") or "")
         if company and title:
-            keys.add((company, title, country))  # stored title (reliable for prefixed slugs)
+            keys.add((job_identity.company_key(row.get("company") or ""), title, country))  # stored title (reliable for prefixed slugs)
         slug = row.get("slug") or ""
         if company and slug:
             slug_norm = slug.replace("-", " ")
@@ -922,7 +922,7 @@ def load_existing_application_urls() -> tuple[set[str], set[tuple[str, str, str]
                 if slug_norm.endswith(loc_slug):
                     slug_norm = slug_norm[: -len(loc_slug)].strip()
             if slug_norm:
-                keys.add((company, slug_norm, country))
+                keys.add((job_identity.company_key(row.get("company") or ""), slug_norm, country))
 
     print(f"\n  Done. {len(urls)} URLs + {len(keys)} identity keys loaded.\n")
     return urls, keys
@@ -1106,7 +1106,7 @@ def main() -> None:
                     skip_count += 1
                     continue
 
-                job_key = (_norm_key(company), _norm_key(title),
+                job_key = (job_identity.company_key(company), _norm_key(title),
                            job_identity.country_of(_build_loc_str(job["location"])))
                 if job_key in existing_keys:
                     skip_count += 1

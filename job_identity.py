@@ -1,14 +1,16 @@
 """
 Shared job identity rules for the sync scripts.
 
-- job_key(): dedup identity = (company, title, country). The same job posted in
+- job_key(): dedup identity = (company_key, title, country). The same job posted in
   several cities of one country is a single listing; the same job in another
   country is a separate listing.
 - country_of(): ports roc_extract_country() from the child theme's functions.php.
   countries.json holds roc_normalize_country()'s static lookup tables, exported via
   ReflectionFunction::getStaticVariables(); re-export it if the PHP table changes.
+- company_key(): ports roc_company_key() from functions.php ("Xendit Inc." == "Xendit").
 - is_aggregator(): job boards, talent platforms and agencies that post on behalf
-  of an unnamed employer. We only list jobs from actual employers.
+  of an unnamed employer, plus labels a feed attaches to other companies' ads.
+  We only list jobs from actual employers.
 """
 
 import json
@@ -25,7 +27,11 @@ AGGREGATORS = {
     "virtualvocations", "jobgether", "lifelancer", "huzzle", "weekday ai", "weekday",
     "mercor", "pavago", "scalejet", "trailhead",
     "the supreme hr advisory pte ltd", "intalent asia",
+    "dealhub ltd",   # WhatJobs SG labels other companies' ads (Mistral, Cloudflare, Xendit...) "DealHub Ltd."
 }
+
+_LEGAL_SUFFIX = re.compile(r"([\s,-]+(inc|incorporated|llc|l\.l\.c|ltd|limited|corp|corporation|co|gmbh|ag|plc|pty|bv|b\.v"
+                           r"|sa|s\.a|srl|s\.r\.l|lp|llp|nv|oy|ab|as|spa|s\.p\.a|sas|kg|pte)\.?)+$")
 
 
 def norm(s: str) -> str:
@@ -34,6 +40,14 @@ def norm(s: str) -> str:
         return ""
     s = re.sub(r"[^\w\s]", "", s.lower().strip())
     return re.sub(r"\s+", " ", s)
+
+
+def company_key(name: str) -> str:
+    """Company grouping key: lowercase, no legal suffix or ".com", letters and digits only."""
+    k = re.sub(r"\.com$", "", (name or "").strip().lower())
+    for _ in range(2):
+        k = _LEGAL_SUFFIX.sub("", k).strip(" ,.-")
+    return re.sub(r"[^a-z0-9]+", "", k)
 
 
 def _normalize_country(raw: str) -> str:
@@ -59,7 +73,7 @@ def country_of(location: str) -> str:
 
 
 def job_key(company: str, title: str, location: str) -> tuple[str, str, str]:
-    return (norm(company), norm(title), country_of(location))
+    return (company_key(company), norm(title), country_of(location))
 
 
 def is_aggregator(company: str) -> bool:
