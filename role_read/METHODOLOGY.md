@@ -1,5 +1,7 @@
 # Role read for candidates: methodology
 
+> Retired 2026-10-25: job pages now show ReLoop.me's own Quick Check (`sync_role_reads.py` calls the ReLoop API). This file describes the earlier Claude Haiku read, which stays on a job only until its ReLoop read arrives.
+
 Draft, 2026-10-25. A short, candidate-focused read of a job ad, shown on featured
 Revenue Operations jobs on RevOps Careers, right under the job description and above
 "Tagged as". It links to ReLoop.me's full Role Intel for the complete read.

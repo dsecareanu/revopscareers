@@ -1,22 +1,27 @@
 
 // ---------------------------------------------------------------------------
-// Role read: candidate-focused read of featured RevOps job ads (post meta _roc_role_read),
-// written by sync_role_reads.py (Claude Haiku 5.5). Method: role_read/METHODOLOGY.md.
+// Role read on featured RevOps job ads. Since 2026-10-25 sync_role_reads.py stores a ReLoop.me
+// Quick Check (post meta _roc_reloop_read) and the page shows ReLoop's own embed. Older jobs may
+// still have our Claude Haiku read (_roc_role_read, method: role_read/METHODOLOGY.md); it is shown
+// only until the ReLoop read arrives.
 // Shown under the job description, above "Tagged as" (the tags plugin appends at priority 10).
 // ---------------------------------------------------------------------------
 add_action( 'rest_api_init', function () {
     $can_edit = function () { return current_user_can( 'edit_posts' ); };
 
-    // Featured, published Revenue Operations (cat 21) jobs without a read yet, newest first
-    // (?days=N: all cat-21 jobs from the last N days, for backfills)
+    // Published Revenue Operations (cat 21) jobs without a ReLoop read, newest first:
+    // featured ones, plus older ones that still show a Haiku read
     register_rest_route( 'roc/v1', '/role-read-queue', [
         'methods'             => 'GET',
         'permission_callback' => $can_edit,
         'callback'            => function ( WP_REST_Request $req ) {
-            $limit = min( 500, max( 1, (int) ( $req['limit'] ?? 60 ) ) );
-            $days  = (int) ( $req['days'] ?? 0 );   // backfill: all cat-21 jobs from the last N days
-            $meta  = [ [ 'key' => '_roc_role_read', 'compare' => 'NOT EXISTS' ] ];
-            if ( ! $days ) $meta[] = [ 'key' => '_featured', 'value' => '1' ];
+            $limit = min( 500, max( 1, (int) ( $req['limit'] ?? 50 ) ) );
+            $meta  = [
+                [ 'key' => '_roc_reloop_read', 'compare' => 'NOT EXISTS' ],
+                [ 'relation' => 'OR',
+                  [ 'key' => '_featured', 'value' => '1' ],
+                  [ 'key' => '_roc_role_read', 'value' => '"summary"', 'compare' => 'LIKE' ] ],
+            ];
             $ids   = get_posts( [
                 'post_type'      => 'job_listing',
                 'post_status'    => 'publish',
@@ -26,14 +31,11 @@ add_action( 'rest_api_init', function () {
                 'order'          => 'DESC',
                 'tax_query'      => [ [ 'taxonomy' => 'job_listing_category', 'terms' => [ 21 ] ] ],
                 'meta_query'     => $meta,
-                'date_query'     => $days ? [ [ 'after' => "$days days ago", 'inclusive' => true ] ] : [],
             ] );
             return array_map( function ( $id ) {
                 return [
                     'id'       => $id,
                     'title'    => get_the_title( $id ),
-                    'location' => (string) get_post_meta( $id, '_job_location', true ),
-                    'salary'   => (string) get_post_meta( $id, '_job_salary', true ),
                     'content'  => get_post_field( 'post_content', $id ),
                 ];
             }, $ids );
@@ -50,6 +52,20 @@ add_action( 'rest_api_init', function () {
                 return new WP_Error( 'roc_bad_read', 'Unknown job or missing read', [ 'status' => 400 ] );
             }
             update_post_meta( $id, '_roc_role_read', wp_slash( wp_json_encode( $read ) ) );
+            return [ 'ok' => true ];
+        },
+    ] );
+
+    register_rest_route( 'roc/v1', '/reloop-read/(?P<id>\d+)', [
+        'methods'             => 'POST',
+        'permission_callback' => $can_edit,
+        'callback'            => function ( WP_REST_Request $req ) {
+            $id   = (int) $req['id'];
+            $read = $req->get_json_params()['read'] ?? null;
+            if ( get_post_type( $id ) !== 'job_listing' || ! is_array( $read ) ) {
+                return new WP_Error( 'roc_bad_read', 'Unknown job or missing read', [ 'status' => 400 ] );
+            }
+            update_post_meta( $id, '_roc_reloop_read', wp_slash( wp_json_encode( $read ) ) );
             return [ 'ok' => true ];
         },
     ] );
@@ -111,15 +127,15 @@ function roc_role_read_html( $read ) {
     if ( ! empty( $read['checks'][0] ) ) $extra .= ' Worth checking: ' . $e( rtrim( $read['checks'][0]['note'], '. ' ) ) . '.';
     if ( ! empty( $read['questions'][0] ) ) $extra .= ' Ask: ' . $e( $read['questions'][0] );
 
-    $h  = '<section class="roc-role-read" aria-label="ReLoop.me role read">';
-    $h .= '<h3><a href="https://www.reloop.me/?utm_source=revopscareers&amp;utm_medium=job_page&amp;utm_campaign=role_read" target="_blank" rel="noopener">ReLoop.me</a> role read</h3>';
+    $h  = '<section class="roc-role-read" aria-label="Role read by RevOps Careers">';
+    $h .= '<h3>Role read by RevOps Careers</h3>';
+    $h .= '<p class="roc-rr-sub">following the <a href="https://www.reloop.me/charter?utm_source=revopscareers&amp;utm_medium=job_page&amp;utm_campaign=role_read" target="_blank" rel="noopener">ReLoop.me Fair Read Charter</a></p>';
     $h .= '<p>' . $e( $read['summary'] ) . '</p>';
     $h .= '<p>' . $level . ' ' . $facts . '</p>';
     if ( $musts || $extra ) $h .= '<p>' . ( $musts ? 'Must-haves: ' . $musts . '.' : '' ) . $extra . '</p>';
     $h .= '<p class="roc-rr-cta"><a href="' . esc_url( $rl ) . '" target="_blank" rel="noopener">'
         . 'Get the full read, with an estimated pay range: ReLoop.me Role Intel &rarr;</a></p>';
-    $h .= '<p class="roc-rr-sub">AI-generated by RevOps Careers using Claude, based on '
-        . '<a href="https://www.reloop.me/charter" target="_blank" rel="noopener">ReLoop.me&rsquo;s Fair Read method</a>, '
+    $h .= '<p class="roc-rr-sub">AI-generated by RevOps Careers using Claude, '
         . $e( $read['generated_at'] ) . '. Indicative, not career advice. '
         . '<a href="mailto:hello@revopscareers.com?subject=' . rawurlencode( 'Role read: ' . get_the_title() ) . '">Report an issue</a>.</p>';
     $h .= '</section>';
@@ -128,6 +144,15 @@ function roc_role_read_html( $read ) {
 
 add_filter( 'the_job_description', function ( $content ) {
     if ( ! is_singular( 'job_listing' ) ) return $content;
+    // A ReLoop read replaces the Haiku one; ReLoop decides what to show (no embed = nothing shown)
+    $reloop = json_decode( (string) get_post_meta( get_the_ID(), '_roc_reloop_read', true ), true );
+    if ( is_array( $reloop ) ) {
+        $embed = (string) ( $reloop['embed']['html'] ?? '' );
+        if ( ! $embed ) return $content;
+        $embed = str_replace( 'utm_source=quick_embed&amp;utm_medium=job_page&amp;utm_campaign=direct',
+            'utm_source=revopscareers&amp;utm_medium=job_page&amp;utm_campaign=role_read', $embed );
+        return $content . '<div class="roc-reloop-read">' . wp_kses_post( $embed ) . '</div>';
+    }
     $read = json_decode( (string) get_post_meta( get_the_ID(), '_roc_role_read', true ), true );
     if ( ! is_array( $read ) || empty( $read['summary'] ) ) return $content;
     return $content . roc_role_read_html( $read );
@@ -139,5 +164,6 @@ add_action( 'wp_head', function () {
 .roc-role-read{border:1px solid #e3e6ea;border-left:4px solid #f16736;border-radius:6px;padding:18px 22px 10px;margin:28px 0 20px;background:#fafbfc}
 .roc-role-read h3{margin:0 0 8px}.roc-role-read p{margin:0 0 10px}
 .roc-rr-cta{font-weight:600}.roc-rr-sub{font-size:.8rem;color:#5f6b7a}
+.roc-reloop-read{margin:28px 0 20px}
 </style>';
 } );

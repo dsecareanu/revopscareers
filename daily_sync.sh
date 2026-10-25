@@ -102,7 +102,7 @@ elif [ $EXIT_RP -ne 0 ];   then log "ERROR: RevPath exited with code $EXIT_RP"; 
 
 log "Phase 1 complete."
 
-# Every run: Role reads (Claude Haiku 5.5) for featured RevOps jobs without one (~40/day, ~$0.001 each)
+# Every run: ReLoop.me role reads for featured RevOps jobs without one (~30/day; ReLoop allows 50/day)
 log "Role reads for featured RevOps jobs..."
 timeout 20m "$PYTHON" -u sync_role_reads.py 2>&1 | tee -a "$LOG_FILE"
 SYNC_EXIT=${PIPESTATUS[0]}
