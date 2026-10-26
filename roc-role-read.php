@@ -80,19 +80,57 @@ function roc_role_read_salary_text( $post_id, $raw ) {
     return trim( $money . ' ' . $period );
 }
 
+/**
+ * ReLoop's embed (title, lines, AI label + link) laid out as paragraphs instead of one bullet list.
+ * ReLoop's wording is kept as is; only "a · b · c" lists are joined into sentences.
+ */
+function roc_reloop_read_html( $embed ) {
+    $e      = 'esc_html';
+    $lower  = function ( $t ) { return preg_match( '/^[A-Z][a-z]/', $t ) ? lcfirst( $t ) : $t; };   // keep "SQL", "HubSpot"
+    $items  = function ( $v ) { return array_values( array_filter( array_map( 'trim', explode( '·', $v ) ) ) ); };
+    $facts  = [];
+    $paras  = [];
+    foreach ( $embed['lines'] as $l ) {
+        $label = $e( rtrim( $l['label'], ': ' ) );
+        $value = trim( (string) $l['value'] );
+        if ( $value === '' ) continue;
+        if ( $l['key'] === 'bigger_picture' ) {
+            $paras[] = $e( $value );
+        } elseif ( in_array( $l['key'], [ 'level', 'title_vs_scope', 'shape', 'inflation' ], true ) ) {
+            $facts[] = '<strong>' . $label . ':</strong> ' . $e( $value ) . '.';
+        } elseif ( $l['key'] === 'capabilities' ) {
+            $list = $items( $value );
+            $list = array_merge( [ $list[0] ], array_map( $lower, array_slice( $list, 1 ) ) );
+            $last = array_pop( $list );
+            $paras[] = '<strong>' . $label . ':</strong> ' . $e( $list ? implode( ', ', $list ) . ' and ' . $last : $last ) . '.';
+        } elseif ( $l['key'] === 'not_for_you_if' ) {
+            $paras[] = '<strong>' . $label . '</strong> ' . $e( implode( ', or ', array_map( $lower, $items( $value ) ) ) ) . '.';
+        } else {
+            $paras[] = '<strong>' . $label . ':</strong> ' . $e( $value );
+        }
+    }
+    if ( $facts ) array_splice( $paras, 1, 0, [ implode( ' ', $facts ) ] );   // right after "Read between the lines"
+    preg_match( '#<div style="font-size:12px[^"]*">(.*?)</div>#s', (string) $embed['html'], $m );   // ReLoop's AI label + link
+    $foot = $m[1] ?? 'Indicative, AI-generated read, no salary range. <a href="https://www.reloop.me/role-intel">ReLoop.me</a>';
+
+    $h  = '<section class="roc-reloop-read" aria-label="' . esc_attr( $embed['title'] ) . '">';
+    $h .= '<h3>' . $e( $embed['title'] ) . '</h3>';
+    foreach ( $paras as $p ) $h .= '<p>' . $p . '</p>';
+    $h .= '<p class="roc-rl-foot">' . wp_kses_post( $foot ) . '</p></section>';
+    return $h;
+}
+
 add_filter( 'the_job_description', function ( $content ) {
     if ( ! is_singular( 'job_listing' ) ) return $content;
     $reloop = json_decode( (string) get_post_meta( get_the_ID(), '_roc_reloop_read', true ), true );
-    $embed  = (string) ( $reloop['embed']['html'] ?? '' );   // ReLoop decides what to show (no embed = nothing shown)
-    if ( ! $embed ) return $content;
-    $embed = str_replace( 'utm_source=quick_embed&amp;utm_medium=job_page&amp;utm_campaign=direct',
-        'utm_source=revopscareers&amp;utm_medium=job_page&amp;utm_campaign=role_read', $embed );
-    return $content . '<div class="roc-reloop-read">' . wp_kses_post( $embed ) . '</div>';
+    if ( empty( $reloop['embed']['html'] ) || empty( $reloop['embed']['lines'] ) ) return $content;   // ReLoop decides what to show
+    return $content . roc_reloop_read_html( $reloop['embed'] );
 }, 9 );
 
 add_action( 'wp_head', function () {
     if ( ! is_singular( 'job_listing' ) ) return;
     echo '<style>
-.roc-reloop-read{margin:28px 0 20px}
+.roc-reloop-read{border:1px solid #e3e6ea;border-left:4px solid #f16736;border-radius:6px;padding:18px 22px 8px;margin:28px 0 20px;background:#fafbfc}
+.roc-reloop-read h3{margin:0 0 10px}.roc-reloop-read p{margin:0 0 12px}.roc-rl-foot{font-size:.8rem;color:#5f6b7a}
 </style>';
 } );
