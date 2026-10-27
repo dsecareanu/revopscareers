@@ -111,7 +111,7 @@ function roc_reloop_read_html( $embed ) {
     }
     if ( $facts ) array_splice( $paras, 1, 0, [ implode( ' ', $facts ) ] );   // right after "Read between the lines"
     preg_match( '#<div style="font-size:12px[^"]*">(.*?)</div>#s', (string) $embed['html'], $m );   // ReLoop's AI label + link
-    $foot = $m[1] ?? 'Indicative, AI-generated read, no salary range. <a href="https://www.reloop.me/role-intel">ReLoop.me</a>';
+    $foot = $m[1] ?? 'Indicative, AI-generated read, no salary range. <a href="https://www.reloop.me/role-intel?utm_source=revopscareers&utm_medium=job_page&utm_campaign=revopscareers&utm_content=role_read">ReLoop.me</a>';
 
     $h  = '<section class="roc-reloop-read" aria-label="' . esc_attr( $embed['title'] ) . '">';
     $h .= '<h3>' . $e( $embed['title'] ) . '</h3>';
