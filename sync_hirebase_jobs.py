@@ -979,10 +979,20 @@ def fetch_hirebase_page(cluster_name: str, cluster_titles: list[str],
         "vector": {"query": cluster_name},
         "lexical": lexical,
     }
-    # neural-search is often slow: generous timeout + retries before giving up on a cluster
-    for attempt in range(1, 4):
+    # neural-search is often slow: generous timeout + retries before giving up on a cluster.
+    # After a quiet period it answers 429 "neural_search_warming_up" (not billed; Hirebase
+    # says retry every 30 s) — wait up to 10 × 30 s for that, separate from the 3 attempts.
+    attempt = 1
+    warmup_waits = 0
+    while True:
         try:
             resp = hb.post(HIREBASE_URL, json=payload, timeout=90)
+            if (resp.status_code == 429 and "neural_search_warming_up" in resp.text
+                    and warmup_waits < 10):
+                warmup_waits += 1
+                print(f"\n  Hirebase neural search warming up — retry {warmup_waits}/10 in 30s...", end=" ")
+                time.sleep(30)
+                continue
             resp.raise_for_status()
             return resp.json()
         except (requests.Timeout, requests.ConnectionError) as e:
@@ -990,6 +1000,7 @@ def fetch_hirebase_page(cluster_name: str, cluster_titles: list[str],
                 raise
             print(f"\n  Hirebase timeout/connection error (attempt {attempt}/3): {e} — retrying...", end=" ")
             time.sleep(15 * attempt)
+            attempt += 1
 
 # =============================================================================
 # MAIN
