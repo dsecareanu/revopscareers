@@ -27,6 +27,7 @@ AGGREGATORS = {
     "virtualvocations", "jobgether", "lifelancer", "huzzle", "weekday ai", "weekday",
     "mercor", "pavago", "scalejet", "trailhead",
     "the supreme hr advisory pte ltd", "intalent asia",
+    "thehivecareers",   # Caribbean recruiter: one template ad per territory, no employer named
     "dealhub ltd",   # WhatJobs SG labels other companies' ads (Mistral, Cloudflare, Xendit...) "DealHub Ltd."
 }
 
