@@ -17,6 +17,7 @@ Usage:
 """
 
 import re
+import time
 from typing import Any
 
 import requests
@@ -207,9 +208,17 @@ def fetch_tag_ids(wp_session: requests.Session, wp_api: str) -> dict[str, int]:
 
     Returns dict keyed by lowercase tag name → WP term ID.
     """
-    r = wp_session.get(f"{wp_api}/job_listing_tag", params={"per_page": 100}, timeout=15)
-    r.raise_for_status()
-    return {t["name"].lower(): t["id"] for t in r.json()}
+    # Retry: one slow WordPress response at startup used to abort the whole import
+    for attempt in range(1, 5):
+        try:
+            r = wp_session.get(f"{wp_api}/job_listing_tag", params={"per_page": 100}, timeout=30)
+            r.raise_for_status()
+            return {t["name"].lower(): t["id"] for t in r.json()}
+        except requests.RequestException as e:
+            if attempt == 4:
+                raise
+            print(f"  [tags] fetch failed ({type(e).__name__}), retry {attempt}/3 in {15 * attempt}s")
+            time.sleep(15 * attempt)
 
 
 def assign_tags(
