@@ -7,7 +7,7 @@ ensures each media item has the company name set as its ALT text.
 
 For each unique media ID across all job listings:
   1. Looks up the company name from the posts that use that media item.
-  2. Fetches the current alt_text for the media item.
+  2. Fetches the current alt_text for the media item (100 per request).
   3. If alt_text is missing or doesn't match the company name, updates it.
 
 Usage:
@@ -115,20 +115,25 @@ def fetch_all_jobs(since_days: int | None = None) -> list[dict]:
     return posts
 
 
-def fetch_media_alt(media_id: int) -> str | None:
-    """Fetch current alt_text for a media item. Returns None on error."""
-    try:
-        resp = session.get(
-            f"{WP_API}/media/{media_id}",
-            params={"_fields": "id,alt_text,title"}
-        )
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.json().get("alt_text", "")
-    except Exception as e:
-        print(f"    [Fetch error for media {media_id}]: {e}")
-        return None
+def fetch_media_alts(media_ids: list[int]) -> dict[int, str]:
+    """Fetch current alt_text for many media items, 100 per request.
+    IDs missing from the result (not found, or a failed batch) are left out."""
+    alts: dict[int, str] = {}
+    for i in range(0, len(media_ids), 100):
+        chunk = media_ids[i:i + 100]
+        print(f"  Fetching media {i + 1}-{i + len(chunk)}/{len(media_ids)}   ", end="\r")
+        try:
+            resp = session.get(
+                f"{WP_API}/media",
+                params={"include": ",".join(map(str, chunk)), "per_page": 100,
+                        "_fields": "id,alt_text"}
+            )
+            resp.raise_for_status()
+            for m in resp.json():
+                alts[m["id"]] = m.get("alt_text", "")
+        except Exception as e:
+            print(f"    [Fetch error for media batch {chunk[0]}-{chunk[-1]}]: {e}")
+    return alts
 
 
 def update_media_alt(media_id: int, alt_text: str) -> bool:
@@ -210,15 +215,15 @@ def main():
     skipped_no_name = 0
     fetch_errors = 0
 
-    for i, mid in enumerate(unique_media, 1):
-        print(f"  [{i}/{len(unique_media)}] checking media {mid}   ", end="\r")
+    current_alts = fetch_media_alts([mid for mid in unique_media if mid in media_company])
 
+    for mid in unique_media:
         desired = media_company.get(mid, "")
         if not desired:
             skipped_no_name += 1
             continue
 
-        current = fetch_media_alt(mid)
+        current = current_alts.get(mid)
         if current is None:
             fetch_errors += 1
             continue

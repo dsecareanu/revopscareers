@@ -24,7 +24,9 @@ main() {
     LOG="$LOG_DIR/$(date -u +%Y%m%d-%H%M)-$MODE.log"
 
     exec 9>"$LOG_DIR/.lock"
-    if ! flock -n 9; then
+    # full (daily cleanup) waits up to 2 h for a running imports run; imports skip at once
+    local WAIT="-n"; [ "$MODE" = "full" ] && WAIT="-w 7200"
+    if ! flock $WAIT 9; then
         echo "$(date -u '+%F %T') $MODE run skipped — previous run still active" >> "$LOG_DIR/skipped.log"
         exit 0
     fi
