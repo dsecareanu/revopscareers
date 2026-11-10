@@ -214,3 +214,6 @@ __marimo__/
 
 # Sync state lives on the server (not in this public repo)
 imported_*.json
+
+# Dry-run output of check_expired_hirebase.py / expire_closed_jobs.py (post data, backups)
+expired_check/
