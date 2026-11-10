@@ -27,6 +27,7 @@ Requirements:
 """
 
 import argparse
+import html
 import io
 import json
 import os
@@ -870,9 +871,10 @@ def create_wp_job(job: dict, media_id: int | None, dry_run: bool) -> dict | None
 
     payload["featured_media"] = media_id or FALLBACK_LOGO_ID
 
+    # Tag from the job description (the post content, HTML stripped), as patch_missing_tags.py does
     tag_term_ids = assign_tags(
         job.get("job_title", ""),
-        (job.get("company_data") or {}).get("description", "") or job.get("job_description", ""),
+        re.sub(r"<[^>]+>", " ", html.unescape(job.get("description", "") or "")),
         job.get("company_name", ""),
         tag_ids, ANTHROPIC_API_KEY,
     )
