@@ -10,18 +10,27 @@ CSV it would use, changes nothing. --apply writes the backup first, then each po
 Usage:
   PYTHONUNBUFFERED=1 /opt/homebrew/bin/python3.14 -u expire_closed_jobs.py --limit 20
   ... --limit 20 --apply
+  ... --csv expired_check/daily/would_expire.csv --max 1000 --apply   # daily_sync.sh
   ... --restore expired_check/<date>/expire_backup_<ts>.csv    # put old values back
 """
-import argparse, csv, sys
+import argparse, csv, os
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-import envfile
 
 WP = "https://revopscareers.com/wp-json/wp/v2/job-listings"
 wp = requests.Session()
-wp.auth = ("webadmin", envfile.env("WP_APP_PASSWORD"))
+
+
+def env(name: str) -> str:
+    if os.environ.get(name):
+        return os.environ[name]
+    import envfile   # local Mac helper; tig exports .env instead
+    return envfile.env(name)
+
+
+wp.auth = (os.environ.get("WP_USERNAME", "webadmin"), env("WP_APP_PASSWORD"))
 TODAY = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
@@ -55,6 +64,7 @@ def main():
     ap.add_argument("--limit", type=int, help="first N rows only")
     ap.add_argument("--apply", action="store_true", help="write (default: dry run)")
     ap.add_argument("--restore", help="backup CSV to restore")
+    ap.add_argument("--max", type=int, help="abort without changes if the CSV has more rows than this")
     args = ap.parse_args()
 
     base = Path(__file__).parent
@@ -62,7 +72,10 @@ def main():
         return restore(base / args.restore)
 
     src = base / args.csv
-    rows = list(csv.DictReader(open(src)))[: args.limit] if args.limit else list(csv.DictReader(open(src)))
+    rows = list(csv.DictReader(open(src)))
+    if args.max is not None and len(rows) > args.max:
+        raise SystemExit(f"ABORT: {len(rows)} rows in {src} > --max {args.max}; nothing changed")
+    rows = rows[: args.limit] if args.limit else rows
     print(f"{'APPLY' if args.apply else 'DRY RUN'}: {len(rows)} rows from {src}, new _job_expires = {TODAY}")
 
     plan = []

@@ -124,17 +124,32 @@ else
     # Phase 2 — Cleanup (sequential, requires imports to be done)
     # =============================================================================
 
-    log "Step 1/4 — ALT text fix (last 2 days)..."
+    log "Step 1/5 — ALT text fix (last 2 days)..."
     "$PYTHON" -u fix_logo_alt_text.py --since 2 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 2/4 — Add missing logos (last 1 day)..."
+    log "Step 2/5 — Add missing logos (last 1 day)..."
     "$PYTHON" -u add_missing_logos.py --since 1 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 3/4 — Fallback logo patch (last 1 day)..."
+    log "Step 3/5 — Fallback logo patch (last 1 day)..."
     "$PYTHON" -u patch_fallback_logos.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
 
-    log "Step 4/4 — Missing tags patch (last 1 day)..."
+    log "Step 4/5 — Missing tags patch (last 1 day)..."
     "$PYTHON" -u patch_missing_tags.py --days 1 --live 2>&1 | tee -a "$LOG_FILE"
+
+    # Expire posts whose Hirebase job closed: yesterday's expired feed, matched by job_id
+    # (hirebase_job_ids.json). The check is read-only; expiry runs only if it succeeded,
+    # and aborts with no changes above 1,000 rows. Backups: expired_check/daily/expire_backup_*.csv
+    log "Step 5/5 — Expire closed Hirebase jobs..."
+    timeout 30m "$PYTHON" -u check_expired_hirebase.py --daily 2>&1 | tee -a "$LOG_FILE"
+    SYNC_EXIT=${PIPESTATUS[0]}
+    if [ $SYNC_EXIT -eq 0 ]; then
+        timeout 30m "$PYTHON" -u expire_closed_jobs.py --csv expired_check/daily/would_expire.csv \
+            --max 1000 --apply 2>&1 | tee -a "$LOG_FILE"
+        SYNC_EXIT=${PIPESTATUS[0]}
+        [ $SYNC_EXIT -ne 0 ] && log "WARNING: expire_closed_jobs.py exited with code $SYNC_EXIT"
+    else
+        log "WARNING: check_expired_hirebase.py exited with code $SYNC_EXIT — expiry skipped"
+    fi
 
 fi
 
