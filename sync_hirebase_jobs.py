@@ -308,12 +308,11 @@ COMPANY_INDUSTRY_BLOCKLIST = [
 
 # Hirebase sometimes matches a job to the wrong company. Key = substring of the
 # application link; the value replaces the company name, website, LinkedIn and logo.
-COMPANY_OVERRIDES: dict[str, dict] = {
-    # Greenhouse board "levanta" = Levanta (creator affiliate platform), not
-    # Levanta Renewables, which complained on 2026-11-11.
-    "greenhouse.io/levanta/": {"company_name": "Levanta", "company_link": "https://levanta.io",
-                               "linkedin_link": "", "logo_id": 266696},
-}
+# Example entry:
+#   "greenhouse.io/levanta/": {"company_name": "Levanta", "company_link": "https://levanta.io",
+#                              "linkedin_link": "", "logo_id": 266696},
+# (Levanta was fixed at the source by Hirebase on 2026-11-11, so the entry was removed.)
+COMPANY_OVERRIDES: dict[str, dict] = {}
 
 
 def apply_company_override(job: dict) -> int | None:
