@@ -151,6 +151,21 @@ else
         log "WARNING: check_expired_hirebase.py exited with code $SYNC_EXIT — expiry skipped"
     fi
 
+    # Posts with an empty Hirebase ID never match the expired feed: check their Lever /
+    # Greenhouse apply link directly (read-only), then expire. Aborts with no changes
+    # above 300 rows. Backups: expired_check/ats/expire_backup_*.csv
+    log "Step 5b/5 — Expire closed Lever/Greenhouse jobs (no Hirebase ID)..."
+    timeout 60m "$PYTHON" -u check_ats_closed.py 2>&1 | tee -a "$LOG_FILE"
+    SYNC_EXIT=${PIPESTATUS[0]}
+    if [ $SYNC_EXIT -eq 0 ]; then
+        timeout 30m "$PYTHON" -u expire_closed_jobs.py --csv expired_check/ats/would_expire.csv \
+            --max 300 --apply 2>&1 | tee -a "$LOG_FILE"
+        SYNC_EXIT=${PIPESTATUS[0]}
+        [ $SYNC_EXIT -ne 0 ] && log "WARNING: expire_closed_jobs.py (ATS) exited with code $SYNC_EXIT"
+    else
+        log "WARNING: check_ats_closed.py exited with code $SYNC_EXIT — ATS expiry skipped"
+    fi
+
 fi
 
 log "===== Daily sync complete ====="
