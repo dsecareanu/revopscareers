@@ -579,6 +579,10 @@ def find_existing_square_logo(company_slug: str) -> int | None:
     for item in sorted(items, key=lambda x: x.get("id", 0)):
         if item.get("id") in PLACEHOLDER_LOGO_IDS:
             continue
+        # WP media search is fuzzy ("wolt" finds "wolters-kluwer-logo"): exact title only
+        title = ((item.get("title") or {}).get("rendered") or "").lower()
+        if not re.fullmatch(rf"{re.escape(company_slug)}-logo(-\d+)?", title):
+            continue
         d = item.get("media_details") or {}
         w, h = d.get("width", 0), d.get("height", 0)
         # Accept if square OR if dimensions unavailable (assume previously validated)
