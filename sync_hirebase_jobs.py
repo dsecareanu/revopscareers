@@ -306,6 +306,28 @@ COMPANY_INDUSTRY_BLOCKLIST = [
     " associates",  # e.g. "Recruiting Associates"
 ]
 
+# Hirebase sometimes matches a job to the wrong company. Key = substring of the
+# application link; the value replaces the company name, website, LinkedIn and logo.
+COMPANY_OVERRIDES: dict[str, dict] = {
+    # Greenhouse board "levanta" = Levanta (creator affiliate platform), not
+    # Levanta Renewables, which complained on 2026-11-11.
+    "greenhouse.io/levanta/": {"company_name": "Levanta", "company_link": "https://levanta.io",
+                               "linkedin_link": "", "logo_id": 266696},
+}
+
+
+def apply_company_override(job: dict) -> int | None:
+    """Fix the company fields in place if the application link matches an override.
+    Returns the override's logo media ID, or None."""
+    app_url = job.get("application_link") or ""
+    for key, o in COMPANY_OVERRIDES.items():
+        if key in app_url:
+            job["company_name"] = o["company_name"]
+            job["company_link"] = o["company_link"]
+            job["company_data"] = {**(job.get("company_data") or {}), "linkedin_link": o["linkedin_link"]}
+            return o["logo_id"]
+    return None
+
 # ---------------------------------------------------------------------------
 # WordPress category IDs — matches n8n workflow category mapping
 # Multi-category: a job can match more than one category
@@ -1134,6 +1156,7 @@ def main() -> None:
             for job in jobs:
                 hb_id   = job.get("_id", "")
                 title   = job.get("job_title", "(no title)")
+                override_logo_id = apply_company_override(job)
                 company = job.get("company_name", "")
                 app_url = job.get("application_link", "")
 
@@ -1183,8 +1206,8 @@ def main() -> None:
                       f"{'Remote' if is_remote else location}")
 
                 # Logo resolution (skipped in dry-run for speed unless --check-logos)
-                media_id: int | None = None
-                if not args.skip_logo and not (args.dry_run and not args.check_logos):
+                media_id: int | None = override_logo_id
+                if media_id is None and not args.skip_logo and not (args.dry_run and not args.check_logos):
                     if company in logo_cache:
                         media_id = logo_cache[company]
                     else:
