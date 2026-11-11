@@ -29,6 +29,15 @@ AGGREGATORS = {
     "the supreme hr advisory pte ltd", "intalent asia",
     "thehivecareers",   # Caribbean recruiter: one template ad per territory, no employer named
     "dealhub ltd",   # WhatJobs SG labels other companies' ads (Mistral, Cloudflare, Xendit...) "DealHub Ltd."
+    # Added 2026-11-11 (live-post scan): job boards / feeds that repost other employers' jobs
+    "jobtraffic", "mycareersfuture", "remotehunter", "remotejobsone", "bestjobsonline", "instaffo",
+    "talentify", "jobs for humanity", "freework", "talentmate", "bossjob", "bdjobscom", "ladders",
+    "job teaser", "minority professional network inc", "talent",   # "Talent" on Lensa = Talent.com
+    # ATS vendor or placeholder names in place of the employer
+    "smartrecruiters inc", "icims careers portal", "zohorecruit", "jobvite inc", "jobdiva inc",
+    "recruiterflow", "company", "page_title", "jobboard", "test board", "thirdparty job posts",
+    # (not "greenhouse": Greenhouse Software posts real jobs under that name)
+    "revops careers",   # WhatJobs SG labels other employers' ads with our own site name
 }
 
 _LEGAL_SUFFIX = re.compile(r"([\s,-]+(inc|incorporated|llc|l\.l\.c|ltd|limited|corp|corporation|co|gmbh|ag|plc|pty|bv|b\.v"
