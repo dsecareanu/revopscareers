@@ -33,10 +33,10 @@ AGGREGATORS = {
     "jobtraffic", "mycareersfuture", "remotehunter", "remotejobsone", "bestjobsonline", "instaffo",
     "talentify", "jobs for humanity", "freework", "talentmate", "bossjob", "bdjobscom", "ladders",
     "job teaser", "minority professional network inc", "talent",   # "Talent" on Lensa = Talent.com
-    # ATS vendor or placeholder names in place of the employer
-    "smartrecruiters inc", "icims careers portal", "zohorecruit", "jobvite inc", "jobdiva inc",
-    "recruiterflow", "company", "page_title", "jobboard", "test board", "thirdparty job posts",
-    # (not "greenhouse": Greenhouse Software posts real jobs under that name)
+    # Placeholder names in place of the employer
+    "company", "page_title", "jobboard", "test board", "thirdparty job posts",
+    # ATS platforms (Greenhouse, SmartRecruiters, iCIMS, Zoho Recruit, Jobvite, JobDiva,
+    # Recruiterflow...) are never filtered: they post real jobs of their own.
     "revops careers",   # WhatJobs SG labels other employers' ads with our own site name
 }
 
