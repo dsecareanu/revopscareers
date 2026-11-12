@@ -9,7 +9,10 @@ Run after check_expired_hirebase.py --daily, which adds new URLs to the map.
 
 Rules (tested 2026-11-11 on 4,648 posts):
   Greenhouse: board list from boards-api (one call per board). A job not in the list
-    is closed only if GET /boards/{board}/jobs/{id} returns 404.
+    is closed only if GET /boards/{board}/jobs/{id} returns 404 AND the job page
+    confirms it: 404, a redirect to ?error=true, or a redirect off greenhouse.io that
+    drops the job ID (the company careers page). A page that still answers 200 = open
+    (2026-11-11: 1 of 979 API 404s was a live page, Crunchyroll post 231949).
   Lever: board list from api.lever.co. A job not in the list is closed only if its
     job page returns 404 (the API hides unlisted postings that are still live).
   Any network or HTTP error = unknown, never closed.
@@ -31,6 +34,7 @@ STATE = BASE / "hirebase_job_ids.json"
 OUT = BASE / "expired_check" / "ats"
 LOCAL_WP = Path.home() / "revopscareers.com" / "public"   # exists on tig only
 PAUSE = 0.3                                                # between ATS requests
+GH_PAGE_PAUSE = 3       # Greenhouse job pages answer 403 after ~300 fast requests
 
 SQL = """SELECT p.ID,
  REPLACE(REPLACE(IFNULL(a.meta_value,''),CHAR(9),''),CHAR(10),''),
@@ -101,12 +105,37 @@ def board_jobs(kind: str, api: str, board: str):
         return None
 
 
+def gh_page_closed(p: dict) -> bool | None:
+    """Greenhouse job page: True = closed, False = open, None = unknown."""
+    for attempt in range(2):
+        time.sleep(GH_PAGE_PAUSE)
+        r = get(p["url"])
+        if r is None:
+            return None
+        final = r.url
+        if "greenhouse.io" not in urlsplit(final).netloc.lower() and p["job"] not in final:
+            return True     # careers redirect; that site may itself answer 403 to bots
+        if r.status_code == 404 or "error=true" in final:
+            return True
+        if r.ok:
+            return False
+        if r.status_code in (403, 429) and attempt == 0:
+            time.sleep(60)  # Greenhouse rate limit: wait once, then give up
+            continue
+        return None
+    return None
+
+
 def is_closed(p: dict) -> bool | None:
     """True = closed, False = open, None = unknown. Only for jobs not in the board list."""
     if p["ats"] == "greenhouse":
         r = get(f"https://boards-api.greenhouse.io/v1/boards/{p['board']}/jobs/{p['job']}")
-    else:
-        r = get(p["url"])   # job page: unlisted postings still answer 200
+        if r is None:
+            return None
+        if r.status_code == 404:
+            return gh_page_closed(p)
+        return False if r.ok else None
+    r = get(p["url"])   # Lever job page: unlisted postings still answer 200
     if r is None:
         return None
     if r.status_code == 404:
